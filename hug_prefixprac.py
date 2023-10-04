@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import torch
 import os
+import argparse
 
 ######################################################
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -51,7 +52,7 @@ processed_datasets = dataset.map(
     preprocess_function,
     batched=True,
     num_proc=1,
-    remove_columns=dataset["train"].column_names,
+    remove_columns=dataset["train"].column_names, # col 삭제
     load_from_cache_file=False,
     desc="Running tokenizer on dataset",
 )
@@ -111,43 +112,89 @@ for epoch in range(num_epochs):
     print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
 ######################################################
 
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# lr = 1e-2
-# num_epochs = 5
-# batch_size = 8
+def evaluate(model, eval_loader, device, args):
+    model.eval()
+    eval_loss = 0
+    for step, batch in enumerate(tqdm(eval_dataloader)):
+        with torch.no_grad():
+            output = model(batch)
 
-# model_name_or_path = 'gpt2-large'
 
-# peft_config = PrefixTuningConfig(
-#     task_type=TaskType.SEQ_2_SEQ_LM, 
-#     inference_mode=False, 
-#     num_virtual_tokens=20
-# )
+def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args):
+    model = model.to(device)
+    model.train()
+    for epoch in range(args.epochs):
+        train_loss = 0
+        for step, batch in enumerate(tqdm(train_loader)):
+            outputs = model(**batch)
+            loss = outputs.loss
+            loss.backward()
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
+        
+        evaluate(model, eval_loader, device, args)
 
-# tokenizer = GPT2Tokenizer.from_pretrained('gpt2-large')
-# model = GPT2Model.from_pretrained('gpt2-large')
-# # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 
-# model = get_peft_model(model, peft_config)
-# model.print_trainable_parameters()
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--epochs', '-e', default=10, type=int,
+                        dest='epochs', help='training epoch')
+    parser.add_argument('--learning-rate', '-lr', default=1e-2, type=float,
+                        dest='lr', help='training learning rate')
+    parser.add_argument('--batch-size', '-bs', default=8, type=int,
+                        dest='batch_size', help='training batch size')
+    parser.add_argument('--model_name_or_path', default= 'gpt2-large',
+                        dest ='model_name_or_path', help='base model')
+    parser.add_argument()
+    args = parser.parse_args()
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# # dataset = load_dataset("hakurei/open-instruct-v1")
+    peft_config = PrefixTuningConfig(
+        task_type=TaskType.SEQ_2_SEQ_LM, 
+        inference_mode=False, 
+        num_virtual_tokens=20
+    )
 
-# optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-# lr_scheduler = get_linear_schedule_with_warmup(
-#     optimizer = optimizer,
-#     num_warmup_steps = 0,
-#     num_training_steps = (len(train_dataloader)*num_epochs)
-# )
+    tokenizer = GPT2Tokenizer.from_pretrained(args.model_name_or_path)
+    model = GPT2Model.from_pretrained(args.model_name_or_path)
+    # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 
-# model = model.to(device)
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
 
-# for epoch in range(num_epochs):
-#     model.train()
-#     for step, batch in enumerate(tqdm(train_dataloader)):
-#         outputs = model(**batch)
-#         loss = outputs.loss
-#         loss.backward()
-#         optimizer.step()
-#         lr_scheduler.step()
-#         optimizer.zero_grad()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    lr_scheduler = get_linear_schedule_with_warmup(
+        optimizer = optimizer,
+        num_warmup_steps = 0,
+        num_training_steps = (len(train_dataloader)*args.epochs)
+    )
+
+    dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+    # dataset = dataset["train"].train_test_split(test_size=0.1)
+    # dataset["validation"] = dataset["test"]
+    # del dataset["test"]
+
+    def preprocess_function():
+        inputs = None
+        return 
+    
+    tokenized_dataset = dataset.map(
+        preprocess_function, 
+        batched=True,
+        remove_columns=dataset["train"].column_names,
+        )
+
+    train_dataset = tokenized_dataset['train']
+    eval_dataset = tokenized_dataset['validation']
+
+    train_loader = DataLoader(train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=args.batch_size, pin_memory=True)
+    eval_loader = DataLoader(eval_dataset, collate_fn=default_data_collator, batch_size=args.batch_size, pin_memory=True)
+
+    train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args)
+    
+
+
+if __name__ == '__main__':
+    main()
