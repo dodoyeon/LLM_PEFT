@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, GPT2Tokenizer, GPT2Model, get_linear_schedule_with_warmup, default_data_collator
+from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, get_linear_schedule_with_warmup, default_data_collator
 from peft import PrefixTuningConfig, get_peft_model, TaskType
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -7,134 +7,56 @@ import torch
 import os
 import argparse
 
-######################################################
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model_name_or_path = "t5-large"
-tokenizer_name_or_path = "t5-large"
-
-text_column = "sentence"
-label_column = "text_label"
-max_length = 128
-lr = 1e-2
-num_epochs = 5
-batch_size = 8
-
-from datasets import load_dataset
-
-dataset = load_dataset("financial_phrasebank", "sentences_allagree")
-dataset = dataset["train"].train_test_split(test_size=0.1)
-dataset["validation"] = dataset["test"]
-del dataset["test"]
-
-classes = dataset["train"].features["label"].names
-dataset = dataset.map(
-    lambda x: {"text_label": [classes[label] for label in x["label"]]},
-    batched=True,
-    num_proc=1,
-)
-
-tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-
-def preprocess_function(examples):
-    inputs = examples[text_column]
-    targets = examples[label_column]
-    model_inputs = tokenizer(inputs, max_length=max_length, padding="max_length", truncation=True, return_tensors="pt")
-    labels = tokenizer(targets, max_length=2, padding="max_length", truncation=True, return_tensors="pt")
-    labels = labels["input_ids"]
-    labels[labels == tokenizer.pad_token_id] = -100
-    model_inputs["labels"] = labels
-    return model_inputs
-
-processed_datasets = dataset.map(
-    preprocess_function,
-    batched=True,
-    num_proc=1,
-    remove_columns=dataset["train"].column_names, # col 삭제
-    load_from_cache_file=False,
-    desc="Running tokenizer on dataset",
-)
-
-train_dataset = processed_datasets["train"]
-eval_dataset = processed_datasets["validation"]
-
-train_dataloader = DataLoader(
-    train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True)
-eval_dataloader = DataLoader(eval_dataset, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True)
-
-peft_config = PrefixTuningConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, num_virtual_tokens=20)
-
-model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
-model = get_peft_model(model, peft_config)
-model.print_trainable_parameters()
-
-optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-lr_scheduler = get_linear_schedule_with_warmup(
-    optimizer=optimizer,
-    num_warmup_steps=0,
-    num_training_steps=(len(train_dataloader) * num_epochs),
-)
-
-model = model.to(device)
-
-for epoch in range(num_epochs):
-    model.train()
-    total_loss = 0
-    for step, batch in enumerate(tqdm(train_dataloader)):
-        batch = {k: v.to(device) for k, v in batch.items()}
-        outputs = model(**batch)
-        loss = outputs.loss
-        total_loss += loss.detach().float()
-        loss.backward()
-        optimizer.step()
-        lr_scheduler.step()
-        optimizer.zero_grad()
-
-    model.eval()
-    eval_loss = 0
-    eval_preds = []
-    for step, batch in enumerate(tqdm(eval_dataloader)):
-        batch = {k: v.to(device) for k, v in batch.items()}
-        with torch.no_grad():
-            outputs = model(**batch)
-        loss = outputs.loss
-        eval_loss += loss.detach().float()
-        eval_preds.extend(
-            tokenizer.batch_decode(torch.argmax(outputs.logits, -1).detach().cpu().numpy(), skip_special_tokens=True)
-        )
-
-    eval_epoch_loss = eval_loss / len(eval_dataloader)
-    eval_ppl = torch.exp(eval_epoch_loss)
-    train_epoch_loss = total_loss / len(train_dataloader)
-    train_ppl = torch.exp(train_epoch_loss)
-    print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
-######################################################
-
 def evaluate(model, eval_loader, device, args):
     model.eval()
     eval_loss = 0
-    for step, batch in enumerate(tqdm(eval_dataloader)):
+    for step, batch in enumerate(tqdm(eval_loader)):
         with torch.no_grad():
-            output = model(batch)
+            outputs = model(batch)
+        loss = outputs.loss
+        eval_loss += loss.detach().float()
+
+    eval_epoch_loss = eval_loss / len(eval_loader)
+    eval_ppl = torch.exp(eval_epoch_loss)
+    return eval_epoch_loss, eval_ppl
+
 
 
 def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args):
     model = model.to(device)
     model.train()
+    train_losses = []
+    eval_losses = [1e5]
     for epoch in range(args.epochs):
         train_loss = 0
         for step, batch in enumerate(tqdm(train_loader)):
             outputs = model(**batch)
             loss = outputs.loss
+            train_loss += loss.detach().float()# .item()?
             loss.backward()
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
         
-        evaluate(model, eval_loader, device, args)
+        eval_epoch_loss, eval_ppl = evaluate(model, eval_loader, device, args)
 
+        train_epoch_loss = train_loss / len(train_loader)
+        train_ppl = torch.exp(train_epoch_loss)
+        train_losses.append(train_epoch_loss)
+        print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
+
+        if args.save_mode == 'all':
+            model_name = 'model_ep_{ep:d}_accu_{accu:3.3f}.pt'.format(ep=epoch, accu=100*eval_epoch_loss)
+            model.save_pretrained(os.path.join(args.result_dir, model_name))
+        elif args.save_mode == 'best':
+            model_name = 'model.pt'
+            if eval_epoch_loss < min(eval_losses):
+                model.save_pretrained(os.path.join(args.result_dir, model_name))
+                print('    - [Info] The checkpoint file has been updated.')
+        else:
+            raise NotImplementedError
+        
+        eval_losses.append(eval_epoch_loss)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -144,9 +66,14 @@ def main():
                         dest='lr', help='training learning rate')
     parser.add_argument('--batch-size', '-bs', default=8, type=int,
                         dest='batch_size', help='training batch size')
+    parser.add_argument('--max_length', '-ml', default=1024, type=int,
+                        dest='max length', help='training batch size')
+    # parser.add_argument('--seed', type=int, default=None) # 허깅페이스 사용하면 굳이 seed 고정할 필요가 없나??
+    parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument()
+    parser.add_argument('--result_dir', default='output',
+                        dest = 'result_dir', help='experiment result save directory')
     args = parser.parse_args()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -157,33 +84,41 @@ def main():
         num_virtual_tokens=20
     )
 
-    tokenizer = GPT2Tokenizer.from_pretrained(args.model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     model = GPT2Model.from_pretrained(args.model_name_or_path)
     # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    lr_scheduler = get_linear_schedule_with_warmup(
-        optimizer = optimizer,
-        num_warmup_steps = 0,
-        num_training_steps = (len(train_dataloader)*args.epochs)
-    )
-
     dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
     # dataset = dataset["train"].train_test_split(test_size=0.1)
     # dataset["validation"] = dataset["test"]
     # del dataset["test"]
+    print('done')
 
-    def preprocess_function():
-        inputs = None
-        return 
+    dataset = dataset.map(
+        # Concat inputs and targets for CLM training
+        lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
+        batched= True,
+        remove_columns=['inputs', 'targets'],
+        num_proc = 1
+    )
+
+    def preprocess_function(examples):
+        inputs = examples['sent_forclm']
+        model_inputs = tokenizer(inputs, padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt") # , max_length=args.max_length, padding='max_length', truncation=True, return_tensors="pt"
+        l = model_inputs['input_ids']
+        for tok in range(len(l)):
+            if len(l[tok]) > 1000: # 1024 보다 길면 일단 없앨수는 없어서 그냥 자르기
+                l[tok] = l[tok][:1000]
+        return model_inputs
     
     tokenized_dataset = dataset.map(
         preprocess_function, 
         batched=True,
-        remove_columns=dataset["train"].column_names,
+        num_proc = 1,
+        remove_columns=dataset["train"].column_names
         )
 
     train_dataset = tokenized_dataset['train']
@@ -191,6 +126,14 @@ def main():
 
     train_loader = DataLoader(train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=args.batch_size, pin_memory=True)
     eval_loader = DataLoader(eval_dataset, collate_fn=default_data_collator, batch_size=args.batch_size, pin_memory=True)
+
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    lr_scheduler = get_linear_schedule_with_warmup(
+        optimizer = optimizer,
+        num_warmup_steps = 8e4,
+        num_training_steps = (len(train_loader)*args.epochs)
+    )
 
     train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args)
     
