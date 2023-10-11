@@ -99,17 +99,18 @@ def main():
     # del dataset["test"]
     print('done')
 
-    # dataset = dataset.map(
-    #     # Concat inputs and targets for CLM training
-    #     lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
-    #     batched= True,
-    #     remove_columns=['inputs', 'targets'],
-    #     num_proc = 1
-    # )
-    
+    def preprocess_func(examples):
+        inputs = examples['inputs_pretokenized']
+        targets = examples['targets_pretokenized']
+        model_inputs = tokenizer(inputs, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt'), # is_split_into_words = True,
+        labels = tokenizer(targets, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt')
+        model_inputs["labels"] = labels
+        labels[labels == tokenizer.pad_token_id] = -100 # ?
+        return model_inputs
+
+
     tokenized_dataset = dataset.map(
-        lambda examples: tokenizer(examples['inputs_pretokenized'], padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt'), # is_split_into_words = True,
-        lambda examples: tokenizer(examples['targets_pretokenized'], padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt'),
+        preprocess_func,
         batched=True, # sent_forclm
         num_proc = 1,
         remove_columns=dataset["train"].column_names
