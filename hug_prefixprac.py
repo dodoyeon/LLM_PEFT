@@ -30,6 +30,7 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
     for epoch in range(args.epochs):
         train_loss = 0
         for step, batch in enumerate(tqdm(train_loader)):
+            batch = {k: v.to(device) for k, v in batch.items()}
             outputs = model(**batch)
             loss = outputs.loss
             train_loss += loss.detach().float()# .item()?
@@ -60,15 +61,15 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', '-e', default=10, type=int,
+    parser.add_argument('--epochs', '-e', default=20, type=int,
                         dest='epochs', help='training epoch')
     parser.add_argument('--learning-rate', '-lr', default=1e-2, type=float,
                         dest='lr', help='training learning rate')
     parser.add_argument('--batch-size', '-bs', default=8, type=int,
                         dest='batch_size', help='training batch size')
     parser.add_argument('--max_length', '-ml', default=1024, type=int,
-                        dest='max length', help='training batch size')
-    # parser.add_argument('--seed', type=int, default=None) # 허깅페이스 사용하면 굳이 seed 고정할 필요가 없나??
+                        dest='max_length', help='maximum sequence length')
+    parser.add_argument('--seed', type=int, default=None) # 허깅페이스 사용하면 굳이 seed 고정할 필요가 없나??
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
@@ -79,12 +80,13 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     peft_config = PrefixTuningConfig(
-        task_type=TaskType.SEQ_2_SEQ_LM, 
+        task_type=TaskType.CAUSAL_LM, # TaskType.SEQ_2_SEQ_LM, 
         inference_mode=False, 
         num_virtual_tokens=20
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
+                                              pad_token='<pad>')
     model = GPT2Model.from_pretrained(args.model_name_or_path)
     # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 
@@ -97,26 +99,18 @@ def main():
     # del dataset["test"]
     print('done')
 
-    dataset = dataset.map(
-        # Concat inputs and targets for CLM training
-        lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
-        batched= True,
-        remove_columns=['inputs', 'targets'],
-        num_proc = 1
-    )
-
-    def preprocess_function(examples):
-        inputs = examples['sent_forclm']
-        model_inputs = tokenizer(inputs, padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt") # , max_length=args.max_length, padding='max_length', truncation=True, return_tensors="pt"
-        l = model_inputs['input_ids']
-        for tok in range(len(l)):
-            if len(l[tok]) > 1000: # 1024 보다 길면 일단 없앨수는 없어서 그냥 자르기
-                l[tok] = l[tok][:1000]
-        return model_inputs
+    # dataset = dataset.map(
+    #     # Concat inputs and targets for CLM training
+    #     lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
+    #     batched= True,
+    #     remove_columns=['inputs', 'targets'],
+    #     num_proc = 1
+    # )
     
     tokenized_dataset = dataset.map(
-        preprocess_function, 
-        batched=True,
+        lambda examples: tokenizer(examples['inputs_pretokenized'], padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt'), # is_split_into_words = True,
+        lambda examples: tokenizer(examples['targets_pretokenized'], padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt'),
+        batched=True, # sent_forclm
         num_proc = 1,
         remove_columns=dataset["train"].column_names
         )
