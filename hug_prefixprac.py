@@ -104,14 +104,15 @@ def main():
         targets = examples['targets_pretokenized']
         model_inputs = tokenizer(inputs, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt'), # is_split_into_words = True,
         labels = tokenizer(targets, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt')
+        labels = labels["input_ids"]
+        # labels[labels == tokenizer.pad_token_id] = -100 # ?
         model_inputs["labels"] = labels
-        labels[labels == tokenizer.pad_token_id] = -100 # ?
         return model_inputs
 
 
     tokenized_dataset = dataset.map(
         preprocess_func,
-        batched=True, # sent_forclm
+        batched=True,
         num_proc = 1,
         remove_columns=dataset["train"].column_names
         )

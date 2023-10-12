@@ -44,6 +44,8 @@ def preprocess_function(examples):
     labels = tokenizer(targets, max_length=2, padding="max_length", truncation=True, return_tensors="pt")
     labels = labels["input_ids"]
     labels[labels == tokenizer.pad_token_id] = -100
+    # labels_new = labels["input_ids"]
+    # labels_new[labels_new == tokenizer.pad_token_id] = -100
     model_inputs["labels"] = labels
     return model_inputs
 
