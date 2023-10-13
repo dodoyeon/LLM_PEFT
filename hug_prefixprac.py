@@ -1,5 +1,5 @@
-from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, get_linear_schedule_with_warmup, default_data_collator
-from peft import PrefixTuningConfig, get_peft_model, TaskType
+from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
+from peft import PrefixTuningConfig, get_peft_model, TaskType # 따로 peft install 해야함
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -24,14 +24,14 @@ def evaluate(model, eval_loader, device, args):
 
 def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args):
     model = model.to(device)
-    model.train()
     train_losses = []
-    eval_losses = [1e5]
+    eval_losses = []
     for epoch in range(args.epochs):
+        model.train()
         train_loss = 0
         for step, batch in enumerate(tqdm(train_loader)):
             batch = {k: v.to(device) for k, v in batch.items()}
-            outputs = model(**batch)
+            outputs = model(**batch, labels = batch['input_ids'])
             loss = outputs.loss
             train_loss += loss.detach().float()# .item()?
             loss.backward()
@@ -67,7 +67,7 @@ def main():
                         dest='lr', help='training learning rate')
     parser.add_argument('--batch-size', '-bs', default=8, type=int,
                         dest='batch_size', help='training batch size')
-    parser.add_argument('--max_length', '-ml', default=1024, type=int,
+    parser.add_argument('--max_length', '-ml', default=1004, type=int, # 1024 인데 prefix length=20 이라서,
                         dest='max_length', help='maximum sequence length')
     parser.add_argument('--seed', type=int, default=None) # 허깅페이스 사용하면 굳이 seed 고정할 필요가 없나??
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
@@ -75,6 +75,9 @@ def main():
                         dest ='model_name_or_path', help='base model')
     parser.add_argument('--result_dir', default='output',
                         dest = 'result_dir', help='experiment result save directory')
+    
+    parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
+                        dest = 'data', help='data preprocess method for Causal LM')
     args = parser.parse_args()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -86,9 +89,11 @@ def main():
     )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
-                                              pad_token='<pad>')
-    model = GPT2Model.from_pretrained(args.model_name_or_path)
+                                              pad_token='<pad>') # -> 이걸하면 vocab size 가 커져서 Index out of range 문제가 뜬다.
+    
+    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
     # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
+    model.resize_token_embeddings(len(tokenizer)) # 위 주석의 문제를 해결하기 위해 이렇게 세팅한다.
 
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
@@ -99,23 +104,38 @@ def main():
     # del dataset["test"]
     print('done')
 
-    def preprocess_func(examples):
-        inputs = examples['inputs_pretokenized']
-        targets = examples['targets_pretokenized']
-        model_inputs = tokenizer(inputs, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt'), # is_split_into_words = True,
-        labels = tokenizer(targets, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt')
-        labels = labels["input_ids"]
-        # labels[labels == tokenizer.pad_token_id] = -100 # ?
-        model_inputs["labels"] = labels
-        return model_inputs
+    if args.data == 'def_clm':
+        def preprocess_func(examples):
+            inputs = examples['inputs_pretokenized']
+            targets = examples['targets_pretokenized']
+            model_inputs = tokenizer(inputs, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt') # is_split_into_words = True,
+            labels = tokenizer(targets, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt')
+            labels = labels["input_ids"]
+            # labels[labels == tokenizer.pad_token_id] = -100 # ?
+            model_inputs["labels"] = labels
+            return model_inputs
 
 
-    tokenized_dataset = dataset.map(
-        preprocess_func,
-        batched=True,
-        num_proc = 1,
-        remove_columns=dataset["train"].column_names
-        )
+        tokenized_dataset = dataset.map(
+            preprocess_func,
+            batched=True,
+            num_proc = 1,
+            remove_columns=dataset["train"].column_names
+            )
+        
+    elif args.data == 'concat':
+        # Concat inputs and targets for CLM training
+        dataset = dataset.map(
+        lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
+        batched= True,
+        remove_columns=dataset["train"].column_names,
+        num_proc = 1)
+
+        tokenized_dataset = dataset.map(
+            lambda examples : tokenizer(examples['sent_forclm'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
+            batched=True,
+            num_proc = 1
+            )
 
     train_dataset = tokenized_dataset['train']
     eval_dataset = tokenized_dataset['validation']
