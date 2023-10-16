@@ -1,31 +1,37 @@
 from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
 from peft import PrefixTuningConfig, get_peft_model, TaskType # 따로 peft install 해야함
 from datasets import load_dataset
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
+# from datasets.dataset_dict import DatasetDict
 from tqdm import tqdm
 import torch
 import os
 import argparse
+from datetime import datetime
 
-def evaluate(model, eval_loader, device, args):
+def train_check(model, args):
+    model.generate()
+
+
+def evaluate(model, eval_loader, device):
     model.eval()
     eval_loss = 0
-    for step, batch in enumerate(tqdm(eval_loader)):
-        with torch.no_grad():
-            outputs = model(batch)
-        loss = outputs.loss
-        eval_loss += loss.detach().float()
+    with torch.no_grad():
+        for step, batch in enumerate(tqdm(eval_loader)):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            outputs = model(**batch, labels = batch['input_ids'])
+            loss = outputs.loss
+            eval_loss += loss.detach().float()
 
     eval_epoch_loss = eval_loss / len(eval_loader)
     eval_ppl = torch.exp(eval_epoch_loss)
     return eval_epoch_loss, eval_ppl
 
 
-
 def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args):
     model = model.to(device)
     train_losses = []
-    eval_losses = []
+    eval_losses = [1e5]
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0
@@ -39,25 +45,34 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
             lr_scheduler.step()
             optimizer.zero_grad()
         
-        eval_epoch_loss, eval_ppl = evaluate(model, eval_loader, device, args)
+        eval_epoch_loss, eval_ppl = evaluate(model, eval_loader, device)
 
         train_epoch_loss = train_loss / len(train_loader)
         train_ppl = torch.exp(train_epoch_loss)
-        train_losses.append(train_epoch_loss)
+        train_losses.append(train_epoch_loss.item())
         print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
 
         if args.save_mode == 'all':
-            model_name = 'model_ep_{ep:d}_accu_{accu:3.3f}.pt'.format(ep=epoch, accu=100*eval_epoch_loss)
-            model.save_pretrained(os.path.join(args.result_dir, model_name))
+            model_name = 'model_ep_{ep:d}_loss_{ls:3.3f}.pt'.format(ep=epoch, ls=eval_epoch_loss)
+            model.save_pretrained(os.path.join(args.output_dir, model_name))
         elif args.save_mode == 'best':
             model_name = 'model.pt'
             if eval_epoch_loss < min(eval_losses):
-                model.save_pretrained(os.path.join(args.result_dir, model_name))
+                model.save_pretrained(os.path.join(args.output_dir, model_name))
                 print('    - [Info] The checkpoint file has been updated.')
         else:
             raise NotImplementedError
         
-        eval_losses.append(eval_epoch_loss)
+        eval_losses.append(eval_epoch_loss.item())
+    
+    output_file = os.path.join(args.output_dir, 'result.txt')
+    with open(output_file, 'w') as f:
+        f.write('trloss\n')
+        f.write(','.join(map(str, train_losses)))
+        f.write('\n')
+        f.write('teloss\n')
+        f.write(','.join(map(str, eval_losses[1:])))
+    
 
 def main():
     parser = argparse.ArgumentParser()
@@ -73,14 +88,25 @@ def main():
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--result_dir', default='output',
-                        dest = 'result_dir', help='experiment result save directory')
+    parser.add_argument('--output_dir', default='output',
+                        help='experiment result save directory')
     
     parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
+    parser.add_argument('--debug', default=False, 
+                        help='data sampling with Subset for debugging')
     args = parser.parse_args()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print('Device: ', device)
+
+    # 실험 결과 저장 directory
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    else:
+        args.output_dir += datetime.today().strftime('_%Y%m%d_%H%M%S')
+        os.makedirs(args.output_dir)
+        print('   - Output directory is changed to avoid overlapping.')
 
     peft_config = PrefixTuningConfig(
         task_type=TaskType.CAUSAL_LM, # TaskType.SEQ_2_SEQ_LM, 
@@ -99,10 +125,6 @@ def main():
     model.print_trainable_parameters()
 
     dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
-    # dataset = dataset["train"].train_test_split(test_size=0.1)
-    # dataset["validation"] = dataset["test"]
-    # del dataset["test"]
-    print('done')
 
     if args.data == 'def_clm':
         def preprocess_func(examples):
@@ -135,10 +157,18 @@ def main():
             lambda examples : tokenizer(examples['sent_forclm'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
             batched=True,
             num_proc = 1
-            )
-
-    train_dataset = tokenized_dataset['train']
-    eval_dataset = tokenized_dataset['validation']
+            )   
+    
+    # For debugging
+    if args.debug:
+        num_train_idxs = list(range(8))
+        train_dataset = Subset(tokenized_dataset['train'], num_train_idxs) # Subset 은 dataloader 가 있어야 indexing 된다!
+        eval_dataset = Subset(tokenized_dataset['validation'], num_train_idxs)
+        print('done')
+    
+    else:
+        train_dataset = tokenized_dataset['train']
+        eval_dataset = tokenized_dataset['validation']
 
     train_loader = DataLoader(train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=args.batch_size, pin_memory=True)
     eval_loader = DataLoader(eval_dataset, collate_fn=default_data_collator, batch_size=args.batch_size, pin_memory=True)
@@ -152,7 +182,7 @@ def main():
     )
 
     train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args)
-    
+
 
 
 if __name__ == '__main__':

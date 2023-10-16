@@ -2,3 +2,4 @@
 XSUM-EMNLP18-Summary-Data-Original.tar.gz
 /peft
 /transformers
+/output*
