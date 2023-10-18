@@ -33,6 +33,7 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
     model = model.to(device)
     train_losses = []
     eval_losses = [1e5]
+    interval = 15000
 
     for epoch in range(args.epochs):
         model.train()
@@ -46,9 +47,14 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
-        
-            if step % args.interval == 17003:
+            
+            if step % interval == 0:
                 eval_epoch_loss, eval_ppl = evaluate(model, eval_loader, device)
+
+                train_epoch_loss = train_loss / len(train_loader)
+                train_ppl = torch.exp(train_epoch_loss)
+                train_losses.append(train_epoch_loss.item())
+                print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
 
                 if args.save_mode == 'all':
                     model_name = 'model_ep_{ep:d}_loss_{ls:3.3f}.pt'.format(ep=epoch, ls=eval_epoch_loss)
@@ -60,13 +66,8 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
                         print('    - [Info] The checkpoint file has been updated.')
                 else:
                     raise NotImplementedError
-                
+        
                 eval_losses.append(eval_epoch_loss.item())
-
-        train_epoch_loss = train_loss / len(train_loader)
-        train_ppl = torch.exp(train_epoch_loss)
-        train_losses.append(train_epoch_loss.item())
-        print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
     
     output_file = os.path.join(args.output_dir, 'result.txt')
     with open(output_file, 'w') as f:
@@ -96,10 +97,8 @@ def main():
     
     parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
-    parser.add_argument('--debug', default=False, 
+    parser.add_argument('--debug', default=True, 
                         help='data sampling with Subset for debugging')
-    parser.add_argument('--interval', default=17004,
-                        help='evaluate term')
     args = parser.parse_args()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -113,7 +112,7 @@ def main():
         torch.backends.cudnn.deterministic = True # add
         torch.backends.cudnn.benchmark = False
         torch.cuda.manual_seed(args.seed) # add
-        # torch.cuda.manual_seed_all(args.seed)  # add
+        # torch.cuda.manual_seed_all(args.seed)
         # torch.set_deterministic(True)
 
     # 실험 결과 저장 directory
@@ -137,8 +136,9 @@ def main():
     # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
     model.resize_token_embeddings(len(tokenizer)) # 위 주석의 문제를 해결하기 위해 이렇게 세팅한다.
 
-    model = get_peft_model(model, peft_config)
+    model = get_peft_model(model, peft_config) # PEFT 설정
     model.print_trainable_parameters()
+    # print(model.num_parameters()) 
 
     dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
 
