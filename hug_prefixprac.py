@@ -63,7 +63,7 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
             lr_scheduler.step()
             optimizer.zero_grad()
         
-            if step % args.interval == 0:#17003:
+            if step % args.interval == 17003:
                 eval_epoch_loss, eval_ppl = evaluate(model, eval_loader, device)
 
                 if args.save_mode == 'all':
@@ -108,9 +108,9 @@ def main():
     
     parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
-    parser.add_argument('--debug', default=True,#False, 
+    parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')
-    parser.add_argument('--interval', default=1,# 17004,
+    parser.add_argument('--interval', default=17004,
                         help='evaluate term')
     args = parser.parse_args()
     
