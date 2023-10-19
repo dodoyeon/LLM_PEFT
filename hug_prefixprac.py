@@ -10,8 +10,18 @@ import argparse
 from datetime import datetime
 import random
 
-def train_check(model, args):
-    model.generate()
+def generation_check(model, tokenized_dataset, tokenizer, args):
+    test_idxs = list(range(5))
+    testset = Subset(tokenized_dataset['test'], test_idxs)
+    test_loader = DataLoader(testset, collate_fn=default_data_collator, batch_size=1, pin_memory=True)
+
+    for inputs in test_loader:
+        outputs = model.generate(inputs)
+        print(tokenizer.decode(outputs))
+
+def test_metric():
+    
+    return
 
 
 def evaluate(model, eval_loader, device):
@@ -25,7 +35,7 @@ def evaluate(model, eval_loader, device):
             eval_loss += loss.detach().float()
 
     eval_epoch_loss = eval_loss / len(eval_loader)
-    eval_ppl = torch.exp(eval_epoch_loss)
+    eval_ppl = torch.exp(eval_epoch_loss) 
     return eval_epoch_loss, eval_ppl
 
 
@@ -33,6 +43,12 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
     model = model.to(device)
     train_losses = []
     eval_losses = [1e5]
+    tr_output_file = os.path.join(args.output_dir, 'tr_result.txt')
+    te_output_file = os.path.join(args.output_dir, 'te_result.txt')
+    with open(tr_output_file, 'w') as f:
+        f.write('trloss, trppl\n')
+    with open(te_output_file, 'w') as f:
+        f.write('teloss, teppl\n')
 
     for epoch in range(args.epochs):
         model.train()
@@ -47,7 +63,7 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
             lr_scheduler.step()
             optimizer.zero_grad()
         
-            if step % args.interval == 17003:
+            if step % args.interval == 0:#17003:
                 eval_epoch_loss, eval_ppl = evaluate(model, eval_loader, device)
 
                 if args.save_mode == 'all':
@@ -62,28 +78,24 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
                     raise NotImplementedError
                 
                 eval_losses.append(eval_epoch_loss.item())
+                with open(te_output_file, 'w') as f:
+                    f.write(f'{eval_epoch_loss.item()}, {eval_ppl}\n')
 
         train_epoch_loss = train_loss / len(train_loader)
         train_ppl = torch.exp(train_epoch_loss)
+        with open(tr_output_file, 'w') as f:
+            f.write(f'{train_epoch_loss}, {train_ppl}\n')
         train_losses.append(train_epoch_loss.item())
         print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
-    
-    output_file = os.path.join(args.output_dir, 'result.txt')
-    with open(output_file, 'w') as f:
-        f.write('trloss\n')
-        f.write(','.join(map(str, train_losses)))
-        f.write('\n')
-        f.write('teloss\n')
-        f.write(','.join(map(str, eval_losses[1:])))
     
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', '-e', default=20, type=int,
+    parser.add_argument('--epochs', '-e', default=10, type=int,
                         dest='epochs', help='training epoch')
-    parser.add_argument('--learning-rate', '-lr', default=1e-2, type=float,
+    parser.add_argument('--learning-rate', '-lr', default=5e-5, type=float,
                         dest='lr', help='training learning rate')
-    parser.add_argument('--batch-size', '-bs', default=4, type=int,
+    parser.add_argument('--batch-size', '-bs', default=1, type=int,
                         dest='batch_size', help='training batch size')
     parser.add_argument('--max_length', '-ml', default=1004, type=int, # 1024 인데 prefix length=20 이라서,
                         dest='max_length', help='maximum sequence length')
@@ -96,9 +108,9 @@ def main():
     
     parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
-    parser.add_argument('--debug', default=False, 
+    parser.add_argument('--debug', default=True,#False, 
                         help='data sampling with Subset for debugging')
-    parser.add_argument('--interval', default=17004,
+    parser.add_argument('--interval', default=1,# 17004,
                         help='evaluate term')
     args = parser.parse_args()
     
@@ -177,7 +189,7 @@ def main():
     
     # For debugging
     if args.debug:
-        num_train_idxs = list(range(8))
+        num_train_idxs = list(range(4))
         train_dataset = Subset(tokenized_dataset['train'], num_train_idxs) # Subset 은 dataloader 가 있어야 indexing 된다!
         eval_dataset = Subset(tokenized_dataset['validation'], num_train_idxs)
         print('done')
@@ -193,7 +205,7 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     lr_scheduler = get_linear_schedule_with_warmup(
         optimizer = optimizer,
-        num_warmup_steps = 8e4,
+        num_warmup_steps = 0, # 8e4,
         num_training_steps = (len(train_loader)*args.epochs)
     )
 

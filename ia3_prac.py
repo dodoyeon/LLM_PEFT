@@ -11,8 +11,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model_name_or_path = "t5-large"
-tokenizer_name_or_path = "t5-large"
+model_name_or_path = "t5-11b"
+tokenizer_name_or_path = "t5-11b"
 
 text_column = "sentence"
 label_column = "text_label"
@@ -63,7 +63,7 @@ train_dataloader = DataLoader(
     train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True)
 eval_dataloader = DataLoader(eval_dataset, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True)
 
-peft_config = IA3Config(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, num_virtual_tokens=20) # 
+peft_config = IA3Config(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, target_modules=["k", "v", "w0"], feedforward_modules=["w0"],) # 
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_peft_model(model, peft_config)
