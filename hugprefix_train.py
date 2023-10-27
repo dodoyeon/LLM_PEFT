@@ -10,20 +10,6 @@ import argparse
 from datetime import datetime
 import random
 
-def generation_check(model, tokenized_dataset, tokenizer, args):
-    test_idxs = list(range(5))
-    testset = Subset(tokenized_dataset['test'], test_idxs)
-    test_loader = DataLoader(testset, collate_fn=default_data_collator, batch_size=1, pin_memory=True)
-
-    for inputs in test_loader:
-        outputs = model.generate(inputs)
-        print(tokenizer.decode(outputs))
-
-def test_metric():
-    
-    return
-
-
 def evaluate(model, eval_loader, device):
     model.eval()
     eval_loss = 0
@@ -93,9 +79,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', '-e', default=10, type=int,
                         dest='epochs', help='training epoch')
-    parser.add_argument('--learning-rate', '-lr', default=5e-5, type=float,
+    parser.add_argument('--learning-rate', '-lr', default=5e-5, type=float, # 1e-2 는 너무 컸다. 처음 te loss 가 7 이었으니,,,
                         dest='lr', help='training learning rate')
-    parser.add_argument('--batch-size', '-bs', default=1, type=int,
+    parser.add_argument('--batch-size', '-bs', default=4, type=int,
                         dest='batch_size', help='training batch size')
     parser.add_argument('--max_length', '-ml', default=1004, type=int, # 1024 인데 prefix length=20 이라서,
                         dest='max_length', help='maximum sequence length')

@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, GPT2Tokenizer, GPT2Model, get_linear_schedule_with_warmup, default_data_collator
+from transformers import AutoTokenizer, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
 from peft import IA3Config, get_peft_model, TaskType
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -11,8 +11,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model_name_or_path = "t5-11b"
-tokenizer_name_or_path = "t5-11b"
+model_name_or_path = 'llama2-13b' # "t5-11b"
+tokenizer_name_or_path = 'llama2-13b' # "t5-11b"
 
 text_column = "sentence"
 label_column = "text_label"
@@ -37,35 +37,38 @@ dataset = dataset.map(
 
 tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
 
-def preprocess_function(examples):
-    inputs = examples[text_column]
-    targets = examples[label_column]
-    model_inputs = tokenizer(inputs, max_length=max_length, padding="max_length", truncation=True, return_tensors="pt")
-    labels = tokenizer(targets, max_length=2, padding="max_length", truncation=True, return_tensors="pt")
+def preprocess_func(examples):
+    inputs = examples['inputs_pretokenized']
+    targets = examples['targets_pretokenized']
+    model_inputs = tokenizer(inputs, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt') # is_split_into_words = True,
+    labels = tokenizer(targets, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt')
     labels = labels["input_ids"]
-    labels[labels == tokenizer.pad_token_id] = -100
+    # labels[labels == tokenizer.pad_token_id] = -100 # ?
     model_inputs["labels"] = labels
     return model_inputs
 
-processed_datasets = dataset.map(
-    preprocess_function,
-    batched=True,
-    num_proc=1,
-    remove_columns=dataset["train"].column_names,
-    load_from_cache_file=False,
-    desc="Running tokenizer on dataset",
-)
 
-train_dataset = processed_datasets["train"]
-eval_dataset = processed_datasets["validation"]
+tokenized_dataset = dataset.map(
+    preprocess_func,
+    batched=True,
+    num_proc = 1,
+    remove_columns=dataset["train"].column_names
+    )
+
+
+train_dataset = tokenized_datasets["train"]
+eval_dataset = tokenized_datasets["validation"]
 
 train_dataloader = DataLoader(
     train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True)
 eval_dataloader = DataLoader(eval_dataset, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True)
 
-peft_config = IA3Config(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, target_modules=["k", "v", "w0"], feedforward_modules=["w0"],) # 
+peft_config = IA3Config(task_type=TaskType.CAUSAL_LM, 
+                        inference_mode=False, 
+                        target_modules=["k_proj", "v_proj", "down_proj"], 
+                        feedforward_modules=["down_proj"],) 
 
-model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
+model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 
