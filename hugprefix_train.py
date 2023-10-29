@@ -89,7 +89,7 @@ def main():
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--output_dir', default='output',
+    parser.add_argument('--output_dir', default='output_pt',
                         help='experiment result save directory')
     
     parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
