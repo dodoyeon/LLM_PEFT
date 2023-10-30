@@ -68,17 +68,18 @@ def draw_graph(dir):
 def test_gen(model, dataset, tokenizer, args):
     gen_dir = os.path.join(args.output_dir, 'generate.txt')
     with open(gen_dir, 'w') as f:
-        f.write(f'<Generated Output>\n')
+        f.write(f'<Generated Output>\n\n')
     test_loader = DataLoader(dataset, pin_memory=True)
     for step, inputs in enumerate(tqdm(test_loader)):
         input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
         outputs = model.generate(input_ids=input_ids, max_new_tokens=20)
         if step % 1000 == 0:
+            print(step)
             with open(gen_dir, 'a') as f:
                 f.write(f'[{step}th Generated Output]\n')
-                f.write(f'{inputs["inputs_pretokenized"][0]}\n')
-                f.write(f'{inputs["targets_pretokenized"][0]}\n')
-                f.write(f'{tokenizer.decode(outputs[0,:].tolist())}\n')
+                f.write(f'{inputs["inputs_pretokenized"][0]}\n\n')
+                f.write(f'{inputs["targets_pretokenized"][0]}\n\n')
+                f.write(f'{tokenizer.decode(outputs[0,:].tolist())}\n\n')
                 f.write('\n')
     print('Done')
 
@@ -86,8 +87,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--output_dir', default='C:/Users/mari970/Downloads/output_20231019_090057/output_20231019_090057',
-                        help='experiment result save directory')  # 'output_20231019_102420',
+    parser.add_argument('--output_dir', default='output_20231019_090057',
+                        help='experiment result save directory')  # C:/Users/mari970/Downloads/output_20231019_090057/
     parser.add_argument('--max_length', '-ml', default=1004, type=int, 
                         dest='max_length', help='maximum sequence length')
     # parser.add_argument()

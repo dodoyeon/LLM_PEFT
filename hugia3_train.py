@@ -78,13 +78,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', '-e', default=10, type=int,
                         dest='epochs', help='training epoch')
-    parser.add_argument('--learning-rate', '-lr', default=5e-5, type=float, # 1e-2 는 너무 컸다. 처음 te loss 가 7 이었으니,,,
+    parser.add_argument('--learning-rate', '-lr', default=5e-5, type=float,
                         dest='lr', help='training learning rate')
     parser.add_argument('--batch-size', '-bs', default=4, type=int,
                         dest='batch_size', help='training batch size')
-    parser.add_argument('--max_length', '-ml', default=1024, type=int, # 1024 인데 prefix length=20 이라서,
+    parser.add_argument('--max_length', '-ml', default=1024, type=int,
                         dest='max_length', help='maximum sequence length')
-    parser.add_argument('--seed', type=int, default=42) # 허깅페이스 사용하면 굳이 seed 고정할 필요가 없나??
+    parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('--model_name_or_path', default= "daryl149/llama-2-7b-chat-hf",
                         dest ='model_name_or_path', help='base model') # 'llama2-13b'
@@ -129,12 +129,12 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
                                               pad_token='<pad>') # -> 이걸하면 vocab size 가 커져서 Index out of range 문제가 뜬다.
     
-    # model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
-    # # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
-    # model.resize_token_embeddings(len(tokenizer)) # 위 주석의 문제를 해결하기 위해 이렇게 세팅한다.
+    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
+    # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
+    model.resize_token_embeddings(len(tokenizer)) # 위 주석의 문제를 해결하기 위해 이렇게 세팅한다.
 
-    # model = get_peft_model(model, peft_config)
-    # model.print_trainable_parameters()
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
 
     dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
 
