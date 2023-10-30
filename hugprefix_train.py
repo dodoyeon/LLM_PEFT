@@ -94,7 +94,7 @@ def main():
     
     parser.add_argument('--data_preprocess', default='def_clm', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
-    parser.add_argument('--debug', default=False, 
+    parser.add_argument('--debug', default=True, 
                         help='data sampling with Subset for debugging')
     parser.add_argument('--interval', default=17004,
                         help='evaluate term')
