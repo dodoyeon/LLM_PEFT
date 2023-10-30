@@ -79,10 +79,12 @@ def test_gen(model, dataset, tokenizer, device, args):
         if step % 1000 == 0:
             print(step)
             with open(gen_dir, 'a') as f:
-                f.write(f'[{step}th Generated Output]\n')
-                f.write(f'{inputs["inputs_pretokenized"][0]}\n\n')
-                f.write(f'{inputs["targets_pretokenized"][0]}\n\n')
-                f.write(f'{tokenizer.decode(outputs[0,:].tolist())}\n\n')
+                f.write(f"[{step}th Generated Output]\n")
+                inp = inputs['inputs_pretokenized'][0].encode('utf8')
+                f.write(f"{inp}\n\n")
+                tar = inputs['targets_pretokenized'][0].encode('utf8')
+                f.write(f"{tar}\n\n")
+                f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
                 f.write('\n')
     print('Done')
 
