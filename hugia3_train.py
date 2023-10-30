@@ -127,11 +127,11 @@ def main():
                         feedforward_modules=["down_proj"],)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
-                                              pad_token='<pad>') # -> 이걸하면 vocab size 가 커져서 Index out of range 문제가 뜬다.
+                                              pad_token='<pad>')
     
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
     # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
-    model.resize_token_embeddings(len(tokenizer)) # 위 주석의 문제를 해결하기 위해 이렇게 세팅한다.
+    model.resize_token_embeddings(len(tokenizer)) 
 
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
@@ -174,7 +174,7 @@ def main():
     # For debugging
     if args.debug:
         num_train_idxs = list(range(4))
-        train_dataset = Subset(tokenized_dataset['train'], num_train_idxs) # Subset 은 dataloader 가 있어야 indexing 된다!
+        train_dataset = Subset(tokenized_dataset['train'], num_train_idxs) 
         eval_dataset = Subset(tokenized_dataset['validation'], num_train_idxs)
         print('done')
     
