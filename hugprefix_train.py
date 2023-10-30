@@ -92,7 +92,7 @@ def main():
     parser.add_argument('--output_dir', default='output_pt',
                         help='experiment result save directory')
     
-    parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
+    parser.add_argument('--data_preprocess', default='def_clm', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
     parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')

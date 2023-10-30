@@ -40,7 +40,7 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
         train_loss = 0
         for step, batch in enumerate(tqdm(train_loader)):
             batch = {k: v.to(device) for k, v in batch.items()}
-            outputs = model(**batch, labels = batch['input_ids'])
+            outputs = model(**batch) # , labels = batch['labels']
             loss = outputs.loss
             train_loss += loss.detach().float()# .item()?
             loss.backward()
@@ -93,7 +93,7 @@ def main():
     
     parser.add_argument('--data_preprocess', default='def_clm', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
-    parser.add_argument('--debug', default=False, 
+    parser.add_argument('--debug', default=True, 
                         help='data sampling with Subset for debugging')
     parser.add_argument('--interval', default=17004,
                         help='evaluate term')
