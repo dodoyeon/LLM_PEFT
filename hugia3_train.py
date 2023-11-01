@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
+from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaForCausalLM, get_linear_schedule_with_warmup, default_data_collator
 from peft import IA3Config, get_peft_model, TaskType
 from datasets import load_dataset
 from torch.utils.data import DataLoader, Subset
@@ -80,8 +80,8 @@ def main():
                         dest='epochs', help='training epoch')
     parser.add_argument('--learning-rate', '-lr', default=5e-5, type=float,
                         dest='lr', help='training learning rate')
-    parser.add_argument('--batch-size', '-bs', default=4, type=int,
-                        dest='batch_size', help='training batch size')
+    parser.add_argument('--batch-size', '-bs', default=2, type=int,
+                        help='training batch size')
     parser.add_argument('--max_length', '-ml', default=1024, type=int,
                         dest='max_length', help='maximum sequence length')
     parser.add_argument('--seed', type=int, default=42)
@@ -93,7 +93,7 @@ def main():
     
     parser.add_argument('--data_preprocess', default='def_clm', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
-    parser.add_argument('--debug', default=True, 
+    parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')
     parser.add_argument('--interval', default=17004,
                         help='evaluate term')
@@ -129,14 +129,14 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
                                               pad_token='<pad>')
     
-    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
+    model = LlamaForCausalLM.from_pretrained(args.model_name_or_path)
     # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
     model.resize_token_embeddings(len(tokenizer)) 
 
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
-
-    dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+    
+    dataset = load_dataset("EdinburghNLP/xsum")
 
     if args.data == 'def_clm':
         def preprocess_func(examples):

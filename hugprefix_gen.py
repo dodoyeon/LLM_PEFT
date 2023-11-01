@@ -75,7 +75,7 @@ def test_gen(model, dataset, tokenizer, device, args):
 
     for step, inputs in enumerate(tqdm(test_loader)):
         input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
-        outputs = model.generate(input_ids=input_ids.to(device), max_new_tokens=20)
+        outputs = model.generate(input_ids=input_ids.to(device), max_new_tokens=20, return_full_text=False)
         if step % 1000 == 0:
             print(step)
             with open(gen_dir, 'a') as f:
