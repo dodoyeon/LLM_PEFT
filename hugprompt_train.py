@@ -16,7 +16,7 @@ def evaluate(model, eval_loader, device):
     with torch.no_grad():
         for step, batch in enumerate(tqdm(eval_loader)):
             batch = {k: v.to(device) for k, v in batch.items()}
-            outputs = model(**batch, labels = batch['input_ids'])
+            outputs = model(**batch)
             loss = outputs.loss
             eval_loss += loss.detach().float()
 
@@ -79,7 +79,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', '-e', default=10, type=int,
                         dest='epochs', help='training epoch')
-    parser.add_argument('--learning-rate', '-lr', default=5e-5, type=float, 
+    parser.add_argument('--learning-rate', '-lr', default=0.03, type=float, 
                         dest='lr', help='training learning rate') # constant lr 0.3??
     parser.add_argument('--batch-size', '-bs', default=4, type=int,
                         dest='batch_size', help='training batch size')
@@ -102,7 +102,7 @@ def main():
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
-    print(3e-2)
+    # print(3e-2)
 
     # For reproducibility
     if args.seed is not None:
@@ -126,7 +126,7 @@ def main():
     peft_config = PromptTuningConfig(
     task_type=TaskType.CAUSAL_LM,
     prompt_tuning_init=PromptTuningInit.TEXT, # prompt tuning embedding initial value type, 다른 종류는 RANDOM
-    num_virtual_tokens=50, # output prompt size (아마)
+    num_virtual_tokens=40, # output prompt size (아마)
     prompt_tuning_init_text="Classify if the tweet is a complaint or not:", # 프롬프트 초기화
     tokenizer_name_or_path=args.model_name_or_path,
 )
