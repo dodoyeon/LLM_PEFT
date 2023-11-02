@@ -127,7 +127,7 @@ def main():
     task_type=TaskType.CAUSAL_LM,
     prompt_tuning_init=PromptTuningInit.TEXT, # prompt tuning embedding initial value type, 다른 종류는 RANDOM
     num_virtual_tokens=40, # output prompt size (아마)
-    prompt_tuning_init_text="Classify if the tweet is a complaint or not:", # 프롬프트 초기화
+    prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
     tokenizer_name_or_path=args.model_name_or_path,
 )
 
@@ -141,7 +141,7 @@ def main():
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+    dataset = load_dataset("EdinburghNLP/xsum")
 
     if args.data == 'def_clm':
         def preprocess_func(examples):
