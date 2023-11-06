@@ -92,26 +92,29 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--output_dir', default='C:/Users/mari970/Downloads/output_20231019_090057/output_20231019_090057',
+    parser.add_argument('--output_dir', default='output',
                         help='experiment result save directory')  # C:/Users/mari970/Downloads/output_20231019_090057/
     parser.add_argument('--max_length', '-ml', default=1004, type=int, 
                         dest='max_length', help='maximum sequence length')
-    # parser.add_argument()
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
 
     model_chkpt = os.path.join(args.output_dir, 'model.pt')
-    # model = AutoModelForCausalLM.from_pretrained(model_chkpt) # 일반 AutoModel 로는 PEFT 로 학습한 모델을 불러올 수 없다. (당연함. Adapter 같은애들은 새로운 모듈을 추가.)
-    model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
+    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path) # 일반 AutoModel 로는 PEFT 로 학습한 모델을 불러올 수 없다. (당연함. Adapter 같은애들은 새로운 모듈을 추가.)
+    # model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token='<pad>')
 
+    # Prefix tuning : p3-xsum 데이터셋 (사실 이 데이터셋을 쓰면 안되고 일반 xsum 데이터셋을 쓰는게 맞지만 이렇게 학습시켜버려서,,)
     dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")['test']
-    # dataset_te = DatasetDict({test: dataset['test']})
-            
     dataset = dataset.remove_columns(['inputs', 'targets'])
+
+    # Prompt tuning 
+    # dataset = load_dataset("EdinburghNLP/xsum")['test']
+    # dataset = dataset.remove_columns(['inputs', 'targets'])
+    
     
     test_gen(model, dataset, tokenizer, device, args)
 

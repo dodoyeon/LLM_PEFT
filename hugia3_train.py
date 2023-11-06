@@ -63,12 +63,12 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
                     raise NotImplementedError
                 
                 eval_losses.append(eval_epoch_loss.item())
-                with open(te_output_file, 'w') as f:
+                with open(te_output_file, 'a') as f:
                     f.write(f'{eval_epoch_loss.item()}, {eval_ppl}\n')
 
         train_epoch_loss = train_loss / len(train_loader)
         train_ppl = torch.exp(train_epoch_loss)
-        with open(tr_output_file, 'w') as f:
+        with open(tr_output_file, 'a') as f:
             f.write(f'{train_epoch_loss}, {train_ppl}\n')
         train_losses.append(train_epoch_loss.item())
         print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
