@@ -75,14 +75,22 @@ def test_gen(model, dataset, tokenizer, device, args):
 
     for step, inputs in enumerate(tqdm(test_loader)):
         input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
-        outputs = model.generate(input_ids=input_ids.to(device), max_new_tokens=20, return_full_text=False)
+        # outputs = model.generate(input_ids=input_ids.to(device), max_new_tokens=20, return_full_text=False)
+        outputs = model.generate(input_ids=input_ids.to(device), 
+                                 max_length=512,
+                                 do_sample=True,
+                                 repetition_penalty=0.5,
+                                 eos_token_id= tokenizer.eos_token_id,
+                                 bos_token_id=tokenizer.bos_token_id,
+                                 use_cache=True
+                                 )
         if step % 1000 == 0:
             print(step)
-            with open(gen_dir, 'a') as f:
+            with open(gen_dir, 'a',encoding='UTF-8') as f:
                 f.write(f"[{step}th Generated Output]\n")
-                inp = inputs['inputs_pretokenized'][0].encode('utf8')
+                inp = inputs['inputs_pretokenized'][0]# .encode('utf8')
                 f.write(f"{inp}\n\n")
-                tar = inputs['targets_pretokenized'][0].encode('utf8')
+                tar = inputs['targets_pretokenized'][0]# .encode('utf8')
                 f.write(f"{tar}\n\n")
                 f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
                 f.write('\n')
@@ -96,24 +104,41 @@ def main():
                         help='experiment result save directory')  # C:/Users/mari970/Downloads/output_20231019_090057/
     parser.add_argument('--max_length', '-ml', default=1004, type=int, 
                         dest='max_length', help='maximum sequence length')
+    parser.add_argument('--met_choice', choice=['peft', 'original'], default='peft')
+    parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='')
     args = parser.parse_args()
+
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
 
-    model_chkpt = os.path.join(args.output_dir, 'model.pt')
-    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path) # 일반 AutoModel 로는 PEFT 로 학습한 모델을 불러올 수 없다. (당연함. Adapter 같은애들은 새로운 모듈을 추가.)
-    # model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
+    if args.met_choice == 'original':
+        # 일반 AutoModel 로는 PEFT 로 학습한 모델을 불러올 수 없다. (당연함. Adapter 같은애들은 새로운 모듈을 추가.)
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path) 
+
+    elif args.met_choice == 'peft':
+        model_chkpt = os.path.join(args.output_dir, 'model.pt')
+        model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
+
+    else:
+        print('ERROR')
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token='<pad>')
 
-    # Prefix tuning : p3-xsum 데이터셋 (사실 이 데이터셋을 쓰면 안되고 일반 xsum 데이터셋을 쓰는게 맞지만 이렇게 학습시켜버려서,,)
-    dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")['test']
-    dataset = dataset.remove_columns(['inputs', 'targets'])
+    if args.data_choice == 'p3':
+        # Prefix tuning : p3-xsum 데이터셋 (사실 이거말고 일반 xsum 데이터셋을 쓰는게 맞지만 이렇게 학습시켜버려서,,)
+        dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")['test']
+        dataset = dataset.remove_columns(['inputs', 'targets'])
 
-    # Prompt tuning 
-    # dataset = load_dataset("EdinburghNLP/xsum")['test']
-    # dataset = dataset.remove_columns(['inputs', 'targets'])
+    elif args.data_choice == 'org_xsum':
+        # Prompt tuning 
+        dataset = load_dataset("EdinburghNLP/xsum")['test']
+        dataset = dataset.remove_columns(['inputs', 'targets'])
+        
+    else:
+        print('ERROR')
     
     
     test_gen(model, dataset, tokenizer, device, args)
