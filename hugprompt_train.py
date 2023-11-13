@@ -41,7 +41,7 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
         train_loss = 0
         for step, batch in enumerate(tqdm(train_loader)):
             batch = {k: v.to(device) for k, v in batch.items()}
-            outputs = model(**batch)
+            outputs = model(**batch, labels = batch['input_ids']) # , labels = batch['input_ids']
             loss = outputs.loss
             train_loss += loss.detach().float()
             loss.backward()
@@ -83,7 +83,7 @@ def main():
                         dest='lr', help='training learning rate') # constant lr 0.3??
     parser.add_argument('--batch-size', '-bs', default=4, type=int,
                         dest='batch_size', help='training batch size')
-    parser.add_argument('--max_length', '-ml', default=974, type=int, 
+    parser.add_argument('--max_length', '-ml', default=984, type=int, 
                         dest='max_length', help='maximum sequence length')
     parser.add_argument('--seed', type=int, default=42) 
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
@@ -92,7 +92,7 @@ def main():
     parser.add_argument('--output_dir', default='output_pt',
                         help='experiment result save directory')
     
-    parser.add_argument('--data_preprocess', default='def_clm', choices = ['def_clm', 'concat'],
+    parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
     parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')
@@ -165,10 +165,11 @@ def main():
     elif args.data == 'concat':
         # Concat inputs and targets for CLM training
         dataset = dataset.map(
-        lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
-        batched= True,
-        remove_columns=dataset["train"].column_names,
-        num_proc = 1)
+            lambda x : {'sent_forclm' : [x['document'][i] + x['summary'][i].lstrip() for i in range(len(x['summary']))]},
+            # lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
+            batched= True,
+            remove_columns=dataset["train"].column_names,
+            num_proc = 1)
 
         tokenized_dataset = dataset.map(
             lambda examples : tokenizer(examples['sent_forclm'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
