@@ -1,169 +1,203 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, default_data_collator
-from peft import AutoPeftModelForCausalLM
-from torch.utils.data import DataLoader
+from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
+from peft import PrefixTuningConfig, get_peft_model, TaskType # 따로 peft install 해야함
 from datasets import load_dataset
-import torch
-
-# import nltk.translate.bleu_score as bleu
+from torch.utils.data import DataLoader, Subset
+# from datasets.dataset_dict import DatasetDict
 from tqdm import tqdm
+import torch
 import os
-import random
 import argparse
-import matplotlib.pyplot as plt
-import numpy as np
+from datetime import datetime
+import random
 
-def draw_graph(dir):
-    tr = os.path.join(dir, 'tr_result.txt')
-    te = os.path.join(dir, 'te_result.txt')
-    trloss, trppl, teloss, teppl = [], [], [], []
-    with open(tr, 'r') as f:
-        l = f.readlines()
-        for line in l[1:]:
-            a, b = line.split(',')
-            trloss.append(float(a))
-            trppl.append(float(b.strip()))
+def evaluate(model, eval_loader, device):
+    model.eval()
+    eval_loss = 0
+    with torch.no_grad():
+        for step, batch in enumerate(tqdm(eval_loader)):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            outputs = model(**batch, labels = batch['input_ids'])
+            loss = outputs.loss
+            eval_loss += loss.detach().float()
 
-    with open(te, 'r') as f:
-        l = f.readlines()
-        for line in l[1:]:
-            a, b = line.split(',')
-            teloss.append(float(a))
-            teppl.append(float(b))
-
-    epoch = list(range(1, 11, 1))
-    epoch_step = list(np.arange((1/3), (31/3), (1/3)))
-
-    fig, ax = plt.subplots(2, 2)
-    # Train Loss
-    ax[0, 0].plot(epoch, trloss, color = 'b', marker='o', markersize=3)
-    ax[0, 0].set_title('Train Loss')
-    ax[0, 0].set_xlabel('epochs')
-    ax[0, 0].set_ylabel('loss')
-    # ax[0, 0].set_ylim([0.9, 1.2])
-    ax[0, 0].grid(True)
-
-    # Train ppl
-    ax[0, 1].plot(epoch, trppl, color = 'g', marker='o', markersize=3)
-    ax[0, 1].set_title('Train PPL')
-    ax[0, 1].set_ylabel('ppl')
-    ax[0, 1].grid(True)
-
-    # Eval Loss
-    ax[1, 0].plot(epoch_step, teloss, color = 'b', marker='o', markersize=3)
-    ax[1, 0].set_title('Eval Loss')
-    ax[1, 0].set_xticks(list(range(0, 11)))
-    ax[1, 0].grid(True)
-
-    # Eval ppl
-    ax[1, 1].plot(epoch_step, teppl, color = 'g', marker='o', markersize=3)
-    ax[1, 1].set_title('Eval PPL')
-    ax[1, 1].set_xticks(list(range(0, 11)))
-    ax[1, 1].grid(True)
-
-    fig.tight_layout()
-    plt.show()
-    plt.savefig('graph')
+    eval_epoch_loss = eval_loss / len(eval_loader)
+    eval_ppl = torch.exp(eval_epoch_loss) 
+    return eval_epoch_loss, eval_ppl
 
 
-def test_gen(model, dataset, tokenizer, device, args):
+def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args):
     model = model.to(device)
-    test_loader = DataLoader(dataset, pin_memory=True)
+    train_losses = []
+    eval_losses = [1e5]
+    tr_output_file = os.path.join(args.output_dir, 'tr_result.txt')
+    te_output_file = os.path.join(args.output_dir, 'te_result.txt')
+    with open(tr_output_file, 'w') as f:
+        f.write('trloss, trppl\n')
+    with open(te_output_file, 'w') as f:
+        f.write('teloss, teppl\n')
 
-    gen_dir = os.path.join(args.output_dir, 'generate.txt')
-    with open(gen_dir, 'w') as f:
-        f.write(f'<Generated Output>\n\n')
-    if args.data_choice == 'p3':
-        for step, inputs in enumerate(tqdm(test_loader)):
-            input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
-            outputs = model.generate(input_ids=input_ids.to(device), 
-                                     max_length=512,
-                                     do_sample=True,
-                                     repetition_penalty=0.5,
-                                     eos_token_id= tokenizer.eos_token_id,
-                                     bos_token_id=tokenizer.bos_token_id,
-                                     use_cache=True
-                                     )
-            if step % 1000 == 0:
-                print(step)
-                with open(gen_dir, 'a',encoding='UTF-8') as f:
-                    f.write(f"[{step}th Generated Output]\n")
-                    inp = inputs['inputs_pretokenized'][0]# .encode('utf8')
-                    f.write(f"{inp}\n\n")
-                    tar = inputs['targets_pretokenized'][0]# .encode('utf8')
-                    f.write(f"{tar}\n\n")
-                    f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
-                    f.write('\n')
+    for epoch in range(args.epochs):
+        model.train()
+        train_loss = 0
+        for step, batch in enumerate(tqdm(train_loader)):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            outputs = model(**batch)
+            loss = outputs.loss
+            train_loss += loss.detach().float()# .item()?
+            loss.backward()
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
+        
+            if step % args.interval == 17003:
+                eval_epoch_loss, eval_ppl = evaluate(model, eval_loader, device)
 
-    elif args.data_choice == 'org_xsum':
-        for step, inputs in enumerate(tqdm(test_loader)):
-            input_ids = tokenizer.encode(inputs['document'][0], return_tensors='pt')
-            outputs = model.generate(input_ids=input_ids.to(device), max_new_tokens=10) # return_full_text=False
-            if step % 1000 == 0:
-                print(step)
-                with open(gen_dir, 'a',encoding='UTF-8') as f:
-                    f.write(f"[{step}th Generated Output]\n")
-                    inp = inputs['document'][0]
-                    f.write(f"{inp}\n\n")
-                    tar = inputs['summary'][0]
-                    f.write(f"{tar}\n\n")
-                    f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
-                    f.write('\n')
-        print('Done')
+                if args.save_mode == 'all':
+                    model_name = 'model_ep_{ep:d}_loss_{ls:3.3f}.pt'.format(ep=epoch, ls=eval_epoch_loss)
+                    model.save_pretrained(os.path.join(args.output_dir, model_name))
+                elif args.save_mode == 'best':
+                    model_name = 'model.pt'
+                    if eval_epoch_loss < min(eval_losses):
+                        model.save_pretrained(os.path.join(args.output_dir, model_name))
+                        print('    - [Info] The checkpoint file has been updated.')
+                else:
+                    raise NotImplementedError
+                
+                eval_losses.append(eval_epoch_loss.item())
+                with open(te_output_file, 'a') as f:
+                    f.write(f'{eval_epoch_loss.item()}, {eval_ppl}\n')
+
+        train_epoch_loss = train_loss / len(train_loader)
+        train_ppl = torch.exp(train_epoch_loss)
+        with open(tr_output_file, 'a') as f:
+            f.write(f'{train_epoch_loss}, {train_ppl}\n')
+        train_losses.append(train_epoch_loss.item())
+        print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
     
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--epochs', '-e', default=10, type=int,
+                        dest='epochs', help='training epoch')
+    parser.add_argument('--learning-rate', '-lr', default=5e-5, type=float, # 1e-2 는 너무 컸다. 처음 te loss 가 7 이었으니,,,
+                        dest='lr', help='training learning rate')
+    parser.add_argument('--batch-size', '-bs', default=4, type=int,
+                        dest='batch_size', help='training batch size')
+    parser.add_argument('--max_length', '-ml', default=1004, type=int, # 1024 인데 prefix length=20 이라서,
+                        dest='max_length', help='maximum sequence length')
+    parser.add_argument('--seed', type=int, default=42) # 허깅페이스 사용하면 굳이 seed 고정할 필요가 없나??
+    parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--output_dir', default='output_pt_20231102_004015',
-                        help='experiment result save directory')  # C:/Users/mari970/Downloads/output_20231019_090057/output_20231019_090057/
-    parser.add_argument('--max_length', '-ml', default=984, type=int, 
-                        dest='max_length', help='maximum sequence length')
-    parser.add_argument('--met_choice', choices=['peft', 'original'], default='peft')
-    parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='org_xsum')
+    parser.add_argument('--output_dir', default='output_pt',
+                        help='experiment result save directory')
+    
+    parser.add_argument('--data_preprocess', default='def_clm', choices = ['def_clm', 'concat'],
+                        dest = 'data', help='data preprocess method for Causal LM')
+    parser.add_argument('--debug', default=False, 
+                        help='data sampling with Subset for debugging')
+    parser.add_argument('--interval', default=17004,
+                        help='evaluate term')
     args = parser.parse_args()
-
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
 
-    if args.met_choice == 'original':
-        # 일반 AutoModel 로는 PEFT 로 학습한 모델을 불러올 수 없다. (당연함. Adapter 같은애들은 새로운 모듈을 추가.)
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path) 
-        print('original trained model')
+    # For reproducibility
+    if args.seed is not None:
+        random.seed(args.seed) # python random seed
+        # np.random.seed(args.seed) # numpy random seed
+        torch.manual_seed(args.seed)
+        torch.backends.cudnn.deterministic = True # add
+        torch.backends.cudnn.benchmark = False
+        torch.cuda.manual_seed(args.seed) # add
+        # torch.cuda.manual_seed_all(args.seed)  # add
+        # torch.set_deterministic(True)
 
-    elif args.met_choice == 'peft':
-        model_chkpt = os.path.join(args.output_dir, 'model.pt')
-        model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
-        print(f'peft trained model {args.output_dir}')
-
+    # 실험 결과 저장 directory
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
     else:
-        print('ERROR')
+        args.output_dir += datetime.today().strftime('_%Y%m%d_%H%M%S')
+        os.makedirs(args.output_dir)
+        print('   - Output directory is changed to avoid overlapping.')
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token='<pad>')
+    peft_config = PrefixTuningConfig(
+        task_type=TaskType.CAUSAL_LM, # TaskType.SEQ_2_SEQ_LM, 
+        inference_mode=False, 
+        num_virtual_tokens=20
+    )
 
-    if args.data_choice == 'p3':
-        # Prefix tuning : p3-xsum 데이터셋 (사실 이거말고 일반 xsum 데이터셋을 쓰는게 맞지만 이렇게 학습시켜버려서,,)
-        dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")['test']
-        dataset = dataset.remove_columns(['inputs', 'targets'])
-        print('p3')
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
+                                              pad_token='<pad>') # -> 이걸하면 vocab size 가 커져서 Index out of range 문제가 뜬다.
+    
+    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
+    # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
+    model.resize_token_embeddings(len(tokenizer)) # 위 주석의 문제를 해결하기 위해 이렇게 세팅한다.
 
-    elif args.data_choice == 'org_xsum':
-        # Prompt tuning 
-        dataset = load_dataset("EdinburghNLP/xsum")['test']
-        dataset = dataset.remove_columns(['id'])
-        print('xsum')
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
+
+    # dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+    dataset = load_dataset("EdinburghNLP/xsum")
+
+    if args.data == 'def_clm':
+        def preprocess_func(examples):
+            inputs = examples['document'] # 'inputs_pretokenized'
+            targets = examples['summary'] # 'targets_pretokenized'
+            model_inputs = tokenizer(inputs, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt') # is_split_into_words = True,
+            labels = tokenizer(targets, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt')
+            labels = labels["input_ids"]
+            # labels[labels == tokenizer.pad_token_id] = -100 # ?
+            model_inputs["labels"] = labels
+            return model_inputs
+
+
+        tokenized_dataset = dataset.map(
+            preprocess_func,
+            batched=True,
+            num_proc = 1,
+            remove_columns=dataset["train"].column_names
+            )
         
-    else:
-        print('ERROR')
-    
-    
-    test_gen(model, dataset, tokenizer, device, args)
+    elif args.data == 'concat':
+        # Concat inputs and targets for CLM training
+        dataset = dataset.map(
+        lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
+        batched= True,
+        remove_columns=dataset["train"].column_names,
+        num_proc = 1)
 
-    # os.environ['KMP_DUPLICATE_LIB_OK']='True'
-    # draw_graph(args.output_dir) 
+        tokenized_dataset = dataset.map(
+            lambda examples : tokenizer(examples['sent_forclm'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
+            batched=True,
+            num_proc = 1
+            )   
+    
+    # For debugging
+    if args.debug:
+        num_train_idxs = list(range(4))
+        train_dataset = Subset(tokenized_dataset['train'], num_train_idxs) # Subset 은 dataloader 가 있어야 indexing 된다!
+        eval_dataset = Subset(tokenized_dataset['validation'], num_train_idxs)
+        print('done')
+    
+    else:
+        train_dataset = tokenized_dataset['train']
+        eval_dataset = tokenized_dataset['validation']
+
+    train_loader = DataLoader(train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=args.batch_size, pin_memory=True)
+    eval_loader = DataLoader(eval_dataset, collate_fn=default_data_collator, batch_size=args.batch_size, pin_memory=True)
+
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    lr_scheduler = get_linear_schedule_with_warmup(
+        optimizer = optimizer,
+        num_warmup_steps = 0, # 8e4,
+        num_training_steps = (len(train_loader)*args.epochs)
+    )
+
+    train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, args)
+
 
 
 if __name__ == '__main__':
