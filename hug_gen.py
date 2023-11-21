@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM, default_data_collator
 from peft import AutoPeftModelForCausalLM
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from datasets import load_dataset
 import torch
 
@@ -110,17 +110,46 @@ def test_gen(model, dataset, tokenizer, device, args):
                     f.write('\n')
         print('Done')
     
+def debug_gen(model, dataset, tokenizer, device, args):
+    model = model.to(device)
+    test_loader = DataLoader(dataset, pin_memory=True)
+
+    gen_dir = os.path.join(args.output_dir, 'generate.txt')
+    with open(gen_dir, 'w') as f:
+        f.write(f'<Generated Output>\n\n')
+
+    for step, inputs in enumerate(tqdm(test_loader)):
+        input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
+        outputs = model.generate(input_ids=input_ids.to(device), 
+                                    max_length=512,
+                                    do_sample=True,
+                                    repetition_penalty=0.5,
+                                    eos_token_id= tokenizer.eos_token_id,
+                                    bos_token_id=tokenizer.bos_token_id,
+                                    use_cache=True
+                                    )
+        print(step)
+        with open(gen_dir, 'a',encoding='UTF-8') as f:
+            f.write(f"[{step}th Generated Output]\n")
+            inp = inputs['inputs_pretokenized'][0]# .encode('utf8')
+            f.write(f"{inp}\n\n")
+            tar = inputs['targets_pretokenized'][0]# .encode('utf8')
+            f.write(f"{tar}\n\n")
+            f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
+            f.write('\n')
+    print('Done')
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--output_dir', default='C:/Users/mari970/Downloads/output_20231019_090057/output_20231019_090057/',
-                        help='experiment result save directory')  #  output_pt_20231102_004015
+    parser.add_argument('--output_dir', default='C:/Users/mari970/Downloads/output_20231019_090057/output_20231019_090057',
+                        help='experiment result save directory')  #  output_pt_20231102_004015 , output_20231019_090057
     parser.add_argument('--max_length', '-ml', default=984, type=int, 
                         dest='max_length', help='maximum sequence length')
     parser.add_argument('--met_choice', choices=['peft', 'original'], default='peft')
-    parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='org_xsum')
+    parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='p3')
+    parser.add_argument('--debug', default=True)
     args = parser.parse_args()
 
     if not os.path.exists(args.output_dir):
@@ -160,8 +189,13 @@ def main():
     else:
         print('ERROR')
     
-    
-    test_gen(model, dataset, tokenizer, device, args)
+    if args.debug:
+        num_train_idxs = list(range(0, len(dataset), 1000))
+        dataset = Subset(dataset, num_train_idxs)
+        print('done')
+        debug_gen(model, dataset, tokenizer, device, args)
+    else:
+        test_gen(model, dataset, tokenizer, device, args)
 
     # os.environ['KMP_DUPLICATE_LIB_OK']='True'
     # draw_graph(args.output_dir) 

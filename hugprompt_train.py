@@ -16,7 +16,7 @@ def evaluate(model, eval_loader, device):
     with torch.no_grad():
         for step, batch in enumerate(tqdm(eval_loader)):
             batch = {k: v.to(device) for k, v in batch.items()}
-            outputs = model(**batch)
+            outputs = model(**batch, labels = batch['input_ids'])
             loss = outputs.loss
             eval_loss += loss.detach().float()
 
@@ -41,7 +41,7 @@ def train(model, train_loader, eval_loader, optimizer, lr_scheduler, device, arg
         train_loss = 0
         for step, batch in enumerate(tqdm(train_loader)):
             batch = {k: v.to(device) for k, v in batch.items()}
-            outputs = model(**batch, labels = batch['input_ids']) # , labels = batch['input_ids']
+            outputs = model(**batch) # , labels = batch['input_ids']
             loss = outputs.loss
             train_loss += loss.detach().float()
             loss.backward()
@@ -92,7 +92,7 @@ def main():
     parser.add_argument('--output_dir', default='output_pt',
                         help='experiment result save directory')
     
-    parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat'],
+    parser.add_argument('--data_preprocess', default='def_clm', choices = ['def_clm', 'concat'],
                         dest = 'data', help='data preprocess method for Causal LM')
     parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')
