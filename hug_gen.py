@@ -139,11 +139,45 @@ def debug_gen(model, dataset, tokenizer, device, args):
             f.write('\n')
     print('Done')
 
+def single_gen(model, dataset, tokenizer, device, args):
+    model = model.to(device)
+    test_loader = DataLoader(dataset, pin_memory=True)
+
+    gen_dir = os.path.join(args.output_dir, 'generate.txt')
+    # with open(gen_dir, 'w') as f:
+    #     f.write(f'<Generated Output>\n\n')
+
+    inputs = {'document': 'The Welsh Economy Research report showed 79% of direct spend was retained in Wales, and associations built nearly 2,000 affordable homes.\nThis was an increase of 4% on the previous year.\nThe annual report, commissioned by Community Housing Cymru, looked at the impact of social housing in Wales.\n1.1bn\ncontributed to the economy in 2014/15\n£872m of that was retained in Wales\n1,923 new homes built in 2014/15\n£301m on repairs/maintenance in 2014/15\n£532m on regeneration in 2014/15'
+              , 'summary':'default'
+              }
+    inputs1 = {'document': "Amirah Droudis, 37, will spend at least 33 years behind bars for killing the woman -who cannot be identified - in 2013.\nDroudis's boyfriend, Man Haron Monis, took 18 people hostage in a Lindt cafe in central Sydney in 2014.\nThe 16-hour siege ended with the deaths of Monis and two hostages when police stormed the building.\nMonis had been charged with being an accessory to his ex-wife's killing, and was on bail at the time of the siege.\nThe Supreme Court of New South Wales heard that Monis planned the 2013 murder and Droudis carried it out.\nThe victim, identified by the pseudonym Helen Lee, was stabbed 18 times before being doused in petrol and set alight outside an apartment in western Sydney.\nAfter the trial, Justice Peter Johnson ruled that Monis recruited Droudis to murder his ex-wife.\n'The offender uncritically adopted and espoused Monis's foul beliefs and acted in public support of him in public protests,' he said in his sentencing remarks on Wednesday.\nThe judge described Monis as 'an evil man' whose death was 'a result of his own criminal and murderous acts'.\n'No-one mourns his passing and many have been left to grapple the consequences of his destructive acts,' he said.\nThe judge acknowledged claims that Droudis had been repeatedly assaulted by Monis.\nDroudis was sentenced to a maximum 44 years in jail with a non-parole period of 33 years.\nDetective Inspector Jason Dickinson, who worked on the case, said he was satisfied with the sentence handed to Droudis.\n'This was a brutal and callous crime and I think the sentence today has reflected that brutality,'' he told the Australian Broadcasting Corp.\nThe victim's family made a statement outside court, thanking the judge, prosecutors and police.\n'Today we are very happy that justice has been served to our only daughter,' the statement said.\nThe findings of an inquest into the cafe siege are due to be handed down this year.\nHow the Sydney siege unfolded"
+              , 'summary':'default'
+              }
+    input_ids = tokenizer.encode(inputs['document'], return_tensors='pt')
+    outputs = model.generate(input_ids=input_ids.to(device), 
+                                max_length=512,
+                                do_sample=True,
+                                repetition_penalty=0.5,
+                                eos_token_id= tokenizer.eos_token_id,
+                                bos_token_id=tokenizer.bos_token_id,
+                                use_cache=True
+                                )
+                                
+    with open(gen_dir, 'a',encoding='UTF-8') as f:
+        f.write(f"[Generated Output]\n")
+        inp = inputs['document']# .encode('utf8')
+        f.write(f"{inp}\n\n")
+        tar = inputs['summary']# .encode('utf8')
+        f.write(f"{tar}\n\n")
+        f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
+        f.write('\n')
+    print('Done')
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--output_dir', default='C:/Users/mari970/Downloads/output_20231019_090057/output_20231019_090057',
+    parser.add_argument('--output_dir', default='C:/Users/mari970/Downloads/model.pt',
                         help='experiment result save directory')  #  output_pt_20231102_004015 , output_20231019_090057
     parser.add_argument('--max_length', '-ml', default=984, type=int, 
                         dest='max_length', help='maximum sequence length')
@@ -190,12 +224,14 @@ def main():
         print('ERROR')
     
     if args.debug:
-        num_train_idxs = list(range(0, len(dataset), 1000))
-        dataset = Subset(dataset, num_train_idxs)
-        print('done')
-        debug_gen(model, dataset, tokenizer, device, args)
+        # num_train_idxs = list(range(0, len(dataset), 1000))
+        # dataset = Subset(dataset, num_train_idxs)
+        # print('done')
+        # debug_gen(model, dataset, tokenizer, device, args)
+        single_gen(model, dataset, tokenizer, device, args)
     else:
         test_gen(model, dataset, tokenizer, device, args)
+
 
     # os.environ['KMP_DUPLICATE_LIB_OK']='True'
     # draw_graph(args.output_dir) 

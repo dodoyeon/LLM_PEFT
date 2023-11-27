@@ -1,3 +1,6 @@
+# hug_prompt_train.py 차용
+import deepspeed
+
 from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
 from peft import PromptTuningConfig, PromptTuningInit, get_peft_model, TaskType, PeftType, get_peft_config
 from datasets import load_dataset
@@ -83,10 +86,8 @@ def main():
                         dest='lr', help='training learning rate') # constant lr 0.3??
     parser.add_argument('--batch-size', '-bs', default=4, type=int,
                         dest='batch_size', help='training batch size')
-    parser.add_argument('--vir_tok', default=30, type=int,
-                        help = 'prompt, prefix tuning num_virtual_token')
     parser.add_argument('--max_length', '-ml', default=994, type=int, 
-                        dest='max_length', help='maximum sequence length, 1024-args.vir_tok')
+                        dest='max_length', help='maximum sequence length')
     parser.add_argument('--seed', type=int, default=42) 
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
@@ -94,12 +95,14 @@ def main():
     parser.add_argument('--output_dir', default='output_pt',
                         help='experiment result save directory')
     
-    parser.add_argument('--data_preprocess', default='seq2seq', choices = ['def_clm', 'concat', 'seq2seq'],
+    parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat', 'seq2seq'],
                         dest = 'data', help='data preprocess method for Causal LM')
     parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')
     parser.add_argument('--interval', default=17004,
                         help='evaluate term')
+    parser.add_argument('--deepspeed', default=True,
+                       help='whether use deepspeed lib or not')
     args = parser.parse_args()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -128,7 +131,7 @@ def main():
     peft_config = PromptTuningConfig(
     task_type=TaskType.CAUSAL_LM,
     prompt_tuning_init=PromptTuningInit.TEXT, # prompt tuning embedding initial value type, 다른 종류는 RANDOM
-    num_virtual_tokens=args.vir_tok, # output prompt size (아마)
+    num_virtual_tokens=30, # output prompt size (아마)
     prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
     tokenizer_name_or_path=args.model_name_or_path,
 )
@@ -138,9 +141,14 @@ def main():
     
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
     # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
+    model.resize_token_embeddings(len(tokenizer)) 
 
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
+
+    model_engine, optimizer, _, _ = deepspeed.initialize(args=cmd_args,
+                                                     model=model,
+                                                     model_parameters=params)
 
     dataset = load_dataset("EdinburghNLP/xsum")
 
@@ -166,53 +174,33 @@ def main():
     elif args.data == 'concat':
         # Concat inputs and targets for CLM training
         dataset = dataset.map(
-            lambda examples : {'content' : [examples['document'][i] + examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
-            # lambda examples : {'content' : [examples['inputs_pretokenized'][i] + examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
+            lambda x : {'sent_forclm' : [x['document'][i] + x['summary'][i].lstrip() for i in range(len(x['summary']))]},
+            # lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
             batched= True,
             remove_columns=dataset["train"].column_names,
             num_proc = 1)
 
         tokenized_dataset = dataset.map(
-            lambda examples : tokenizer(examples['content'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
+            lambda examples : tokenizer(examples['sent_forclm'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
             batched=True,
             num_proc = 1
             )  
 
     elif args.data == 'seq2seq':
         # article + <sep> + summary form
-        # sep 토큰 tokenizer 에 있는지 없는지 확인하기. -> 원래는 없는 듯.
-        tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
-
+        # sep 토큰 tokenizer 에 있는지 없ㄴ느지 확인하기.
         dataset = dataset.map(
-            lambda examples : {'content' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
+            lambda x : {'sent_forclm' : [x['document'][i] + x['summary'][i].lstrip() for i in range(len(x['summary']))]},
+            # lambda x : {'sent_forclm' : [x['inputs_pretokenized'][i] + x['targets_pretokenized'][i].lstrip() for i in range(len(x['targets_pretokenized']))]},
             batched= True,
-            remove_columns=['summary'],
-            num_proc = 1)
-        
-        tokenized_dataset = dataset.map(
-            lambda examples : tokenizer(examples['content'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
-            batched=True,
+            remove_columns=dataset["train"].column_names,
             num_proc = 1)
 
-        print('Done')
-            
-        # def preprocess_func(examples):
-        #     inputs = tokenizer(examples['document'])
-        #     targets = tokenizer(examples['summary'])
-        #     labels = inputs['input_ids'] + [tokenizer.sep_token_id] + targets['input_ids']
-        #     text = tokenizer.encode(tokenizer.pad_token)*1022
-        #     text[:len(labels)] = labels
-        #     text = torch.tensor(text)
-        #     model_inputs = {"inputs": torch.tensor(inputs), "labels": text}
-        #     return model_inputs
-        # 
-        # tokenized_dataset = dataset.map(
-        #     preprocess_func,
-        #     # batched=True,
-        #     remove_columns=['summary']
-        # )
-        
-    model.resize_token_embeddings(len(tokenizer)) 
+        tokenized_dataset = dataset.map(
+            lambda examples : tokenizer(examples['sent_forclm'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
+            batched=True,
+            num_proc = 1
+            )
     
     # For debugging
     if args.debug:
