@@ -104,7 +104,6 @@ def main():
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
-    # print(3e-2)
 
     # For reproducibility
     if args.seed is not None:
@@ -126,12 +125,12 @@ def main():
         print('   - Output directory is changed to avoid overlapping.')
 
     peft_config = PromptTuningConfig(
-    task_type=TaskType.CAUSAL_LM,
-    prompt_tuning_init=PromptTuningInit.TEXT, # prompt tuning embedding initial value type, 다른 종류는 RANDOM
-    num_virtual_tokens=args.vir_tok, # output prompt size (아마)
-    prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
-    tokenizer_name_or_path=args.model_name_or_path,
-)
+        task_type=TaskType.CAUSAL_LM,
+        prompt_tuning_init=PromptTuningInit.TEXT, # prompt tuning embedding initial value type, 다른 종류는 RANDOM
+        num_virtual_tokens=args.vir_tok, # output prompt size (아마)
+        prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
+        tokenizer_name_or_path=args.model_name_or_path,
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
                                               pad_token='<pad>') 
@@ -182,11 +181,12 @@ def main():
         # article + <sep> + summary form
         # sep 토큰 tokenizer 에 있는지 없는지 확인하기. -> 원래는 없는 듯.
         tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
+        a = 0
 
         dataset = dataset.map(
             lambda examples : {'content' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
             batched= True,
-            remove_columns=['summary'],
+            remove_columns=['summary', 'id'],
             num_proc = 1)
         
         tokenized_dataset = dataset.map(
@@ -194,8 +194,8 @@ def main():
             batched=True,
             num_proc = 1)
 
-        print('Done')
-            
+        print(sum([1 for i in range(len(tokenized_dataset['train']['content'])) if 50257 in tokenized_dataset['train']['input_ids'][i]]))
+
         # def preprocess_func(examples):
         #     inputs = tokenizer(examples['document'])
         #     targets = tokenizer(examples['summary'])
@@ -208,7 +208,7 @@ def main():
         # 
         # tokenized_dataset = dataset.map(
         #     preprocess_func,
-        #     # batched=True,
+        #     batched=True,
         #     remove_columns=['summary']
         # )
         
