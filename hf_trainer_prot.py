@@ -3,7 +3,7 @@ from trl import SFTTrainer
 from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
 from peft import PromptTuningConfig, PromptTuningInit, get_peft_model, TaskType, PeftType, get_peft_config
 import torch
-import deepspeed
+# import deepspeed
 
 import argparse
 import random
@@ -14,9 +14,11 @@ def add_arguments():
     parser.add_argument('--epochs', '-e', default=10, type=int,
                          help='training epoch')
     parser.add_argument('--learning_rate', '-lr', default=0.3, type=float, 
-                         help='training learning rate') # constant lr 0.3??
+                        dest='lr', help='training learning rate') # constant lr 0.3??
     parser.add_argument('--batch_size', '-bs', default=4, type=int,
                          help='training batch size')
+    parser.add_argument('--vir_tok', default=30, type=int,
+                        help = 'prompt, prefix tuning num_virtual_token')
     parser.add_argument('--max_length', '-ml', default=994, type=int, 
                          help='maximum sequence length')
     parser.add_argument('--seed', type=int, default=42) 
@@ -26,17 +28,17 @@ def add_arguments():
     parser.add_argument('--output_dir', default='output_pt',
                         help='experiment result save directory')
     
-    parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat', 'seq2seq'],
-                         help='data preprocess method for Causal LM')
+    parser.add_argument('--data_preprocess', default='seq2seq', choices = ['def_clm', 'concat', 'seq2seq'],
+                         dest = 'data', help='data preprocess method for Causal LM')
     parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')
     parser.add_argument('--interval', default=17004,
                         help='evaluate term')
-    parser.add_argument('--deepspeed', default=True,
+    parser.add_argument('--deepspeed_use', default=True,
                        help='whether use deepspeed lib or not')
     
     # Include DeepSpeed configuration arguments.
-    parser = deepspeed.add_config_arguments(parser)
+    # parser = deepspeed.add_config_arguments(parser)
 
     args = parser.parse_args()
 
@@ -47,7 +49,9 @@ def main():
     dataset = load_dataset("EdinburghNLP/xsum")
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
                                               pad_token='<pad>')
-    
+    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     peft_config = PromptTuningConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -110,6 +114,17 @@ def main():
             lambda examples : tokenizer(examples['content'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
             batched=True,
             num_proc = 1)
+        
+    model.resize_token_embeddings(len(tokenizer)) 
+
+    train_dataset = tokenized_dataset['train']
+    eval_dataset = tokenized_dataset['validation']
+
+    lr_scheduler = get_linear_schedule_with_warmup(
+        optimizer = optimizer,
+        num_warmup_steps = 0, # 8e4,
+        num_training_steps = ((dataset['train'].shape[0]//args.batch_size+1)*args.epochs)
+    )
 
     # For reproducibility
     if args.seed is not None:
@@ -123,14 +138,18 @@ def main():
         # torch.set_deterministic(True)
 
     trainer = SFTTrainer(
-        model = args.model_name_or_path,
-        train_dataset=dataset,
-        eval_dataset = ,
+        model = model,
+        train_dataset=train_dataset,
+        eval_dataset = eval_dataset,
         dataset_batch_size = args.batch_size,
-        tokenizer = ,
+        tokenizer = tokenizer,
         dataset_text_field="text",
+        optimizers = lr_scheduler,
         max_seq_length=1024,
         peft_config = peft_config,
         # neftune_noise_alpha=5,
     )
     trainer.train()
+
+if __name__ == "__main__":
+    main()
