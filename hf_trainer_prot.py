@@ -1,13 +1,13 @@
 from datasets import load_dataset
 from trl import SFTTrainer
-from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
+from transformers import AutoTokenizer, AutoModelForCausalLM, get_linear_schedule_with_warmup, TrainingArguments
 from peft import PromptTuningConfig, PromptTuningInit, get_peft_model, TaskType, PeftType, get_peft_config
 import torch
 # import deepspeed
 
 import argparse
 import random
-
+import os
 
 def add_arguments():
     parser = argparse.ArgumentParser()
@@ -102,7 +102,6 @@ def main():
         # article + <sep> + summary form
         # sep 토큰 tokenizer 에 있는지 없는지 확인하기. -> 원래는 없는 듯.
         tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
-        a = 0
 
         dataset = dataset.map(
             lambda examples : {'content' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
@@ -123,7 +122,7 @@ def main():
     lr_scheduler = get_linear_schedule_with_warmup(
         optimizer = optimizer,
         num_warmup_steps = 0, # 8e4,
-        num_training_steps = ((dataset['train'].shape[0]//args.batch_size+1)*args.epochs)
+        num_training_steps = ((dataset['train'].shape[0]//args.batch_size+1)*args.epochs) # trainloader 사용하지 않기 때문에
     )
 
     # For reproducibility
@@ -137,8 +136,23 @@ def main():
         # torch.cuda.manual_seed_all(args.seed)  # add
         # torch.set_deterministic(True)
 
+    training_args = TrainingArguments(
+        output_dir=args.output_dir,
+        num_train_epochs=args.epochs,
+        evaluation_strategy="epoch",
+        logging_dir='log.txt',
+        logging_strategy="epoch",
+        save_strategy="epoch",
+        do_train=True,
+        do_eval=True,
+        seed=args.seed,
+        deepspeed=True
+        
+    )
+
     trainer = SFTTrainer(
         model = model,
+        args = training_args,
         train_dataset=train_dataset,
         eval_dataset = eval_dataset,
         dataset_batch_size = args.batch_size,

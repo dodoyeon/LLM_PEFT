@@ -194,7 +194,15 @@ def main():
             batched=True,
             num_proc = 1)
 
-        # print(sum([1 for i in range(len(tokenized_dataset['train']['content'])) if 50257 in tokenized_dataset['train']['input_ids'][i]]))
+        def sep_check(): # 시간 너무 오래걸림
+            l = len(tokenized_dataset['train']['content'])
+            check = torch.zeros(l)
+            for i in range(l):
+                if 50258 in tokenized_dataset['train']['input_ids'][i]:
+                    a[i] = 1
+                else:
+                    pass
+            return check
 
         # def preprocess_func(examples):
         #     inputs = tokenizer(examples['document'])
