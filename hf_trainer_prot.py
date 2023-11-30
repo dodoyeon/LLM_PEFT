@@ -145,7 +145,7 @@ def main():
         do_train=True,
         do_eval=True,
         num_train_epochs=args.epochs,
-        learning_rate=args.learning_rate,
+        learning_rate=args.lr,
         evaluation_strategy="epoch",
         logging_dir='log.txt',
         logging_steps=args.interval,
