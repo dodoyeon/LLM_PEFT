@@ -36,6 +36,8 @@ def add_arguments():
                         help='evaluate term')
     parser.add_argument('--deepspeed_use', default=True,
                        help='whether use deepspeed lib or not')
+    parser.add_argument('--dsconfig_dir', default= './deepspeed_config.json',
+                        help='deepspeed configuration (json) file directory location')
     
     # Include DeepSpeed configuration arguments.
     # parser = deepspeed.add_config_arguments(parser)
@@ -60,6 +62,8 @@ def main():
         prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
         tokenizer_name_or_path=args.model_name_or_path
         )
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
@@ -138,16 +142,16 @@ def main():
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        num_train_epochs=args.epochs,
-        evaluation_strategy="epoch",
-        logging_dir='log.txt',
-        logging_strategy="epoch",
-        save_strategy="epoch",
         do_train=True,
         do_eval=True,
+        num_train_epochs=args.epochs,
+        learning_rate=args.learning_rate,
+        evaluation_strategy="epoch",
+        logging_dir='log.txt',
+        logging_steps=args.interval,
+        save_steps=args.interval, 
         seed=args.seed,
-        deepspeed=True
-
+        deepspeed=args.dsconfig_dir
     )
 
     trainer = Trainer(
@@ -155,12 +159,8 @@ def main():
         args = training_args,
         train_dataset=train_dataset,
         eval_dataset = eval_dataset,
-        dataset_batch_size = args.batch_size,
         tokenizer = tokenizer,
-        dataset_text_field="text",
-        optimizers = lr_scheduler,
-        max_seq_length=1024,
-        peft_config = peft_config,
+        # optimizers = optimizer # lr_scheduler
         # neftune_noise_alpha=5,
     )
     trainer.train()
