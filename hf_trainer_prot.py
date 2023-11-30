@@ -39,6 +39,9 @@ def add_arguments():
     parser.add_argument('--dsconfig_dir', default= './deepspeed_config.json',
                         help='deepspeed configuration (json) file directory location')
     
+    parser.add_argument("--local_rank", type=int,
+                        help="Local rank. Necessary for using the torch.distributed.launch utility.")
+    
     # Include DeepSpeed configuration arguments.
     # parser = deepspeed.add_config_arguments(parser)
 
@@ -53,7 +56,7 @@ def main():
                                               pad_token='<pad>')
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    torch.cuda.set_device(0)
 
     peft_config = PromptTuningConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -122,12 +125,6 @@ def main():
 
     train_dataset = tokenized_dataset['train']
     eval_dataset = tokenized_dataset['validation']
-
-    lr_scheduler = get_linear_schedule_with_warmup(
-        optimizer = optimizer,
-        num_warmup_steps = 0, # 8e4,
-        num_training_steps = ((dataset['train'].shape[0]//args.batch_size+1)*args.epochs) # trainloader 사용하지 않기 때문에
-    )
 
     # For reproducibility
     if args.seed is not None:
