@@ -1,6 +1,6 @@
 from datasets import load_dataset
-from trl import SFTTrainer
-from transformers import AutoTokenizer, AutoModelForCausalLM, get_linear_schedule_with_warmup, TrainingArguments
+# from trl import SFTTrainer
+from transformers import AutoTokenizer, AutoModelForCausalLM, get_linear_schedule_with_warmup, TrainingArguments, Trainer
 from peft import PromptTuningConfig, PromptTuningInit, get_peft_model, TaskType, PeftType, get_peft_config
 import torch
 # import deepspeed
@@ -147,10 +147,10 @@ def main():
         do_eval=True,
         seed=args.seed,
         deepspeed=True
-        
+
     )
 
-    trainer = SFTTrainer(
+    trainer = Trainer(
         model = model,
         args = training_args,
         train_dataset=train_dataset,
