@@ -8,6 +8,7 @@ import torch
 import argparse
 import random
 import os
+from datetime import datetime
 
 def add_arguments():
     parser = argparse.ArgumentParser()
@@ -56,7 +57,15 @@ def main():
                                               pad_token='<pad>')
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
 
-    torch.cuda.set_device(0)
+    # torch.cuda.set_device(0)
+
+    # 실험 결과 저장 directory
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    else:
+        args.output_dir += datetime.today().strftime('_%Y%m%d_%H%M%S')
+        os.makedirs(args.output_dir)
+        print('   - Output directory is changed to avoid overlapping.')
 
     peft_config = PromptTuningConfig(
         task_type=TaskType.CAUSAL_LM,
@@ -65,8 +74,6 @@ def main():
         prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
         tokenizer_name_or_path=args.model_name_or_path
         )
-    model = get_peft_model(model, peft_config)
-    model.print_trainable_parameters()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
@@ -121,7 +128,10 @@ def main():
             batched=True,
             num_proc = 1)
         
-    model.resize_token_embeddings(len(tokenizer)) 
+    model.resize_token_embeddings(len(tokenizer)) # resize 는 반드시 get_peft_model(즉, peft를 씌우기전에) 해줘야한다!
+
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
 
     train_dataset = tokenized_dataset['train']
     eval_dataset = tokenized_dataset['validation']
@@ -144,11 +154,11 @@ def main():
         num_train_epochs=args.epochs,
         learning_rate=args.lr,
         evaluation_strategy="epoch",
-        logging_dir='log.txt',
+        logging_dir='log',
         logging_steps=args.interval,
         save_steps=args.interval, 
         seed=args.seed,
-        deepspeed=args.dsconfig_dir
+        # deepspeed=args.dsconfig_dir
     )
 
     trainer = Trainer(
