@@ -60,12 +60,12 @@ def main():
     # torch.cuda.set_device(0)
 
     # 실험 결과 저장 directory
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-    else:
+    if os.path.exists(args.output_dir):
         args.output_dir += datetime.today().strftime('_%Y%m%d_%H%M%S')
-        os.makedirs(args.output_dir)
         print('   - Output directory is changed to avoid overlapping.')
+    else:
+        pass
+        
 
     peft_config = PromptTuningConfig(
         task_type=TaskType.CAUSAL_LM,
