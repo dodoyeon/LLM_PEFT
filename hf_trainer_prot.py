@@ -1,6 +1,6 @@
 from datasets import load_dataset
 # from trl import SFTTrainer
-from transformers import AutoTokenizer, AutoModelForCausalLM, get_linear_schedule_with_warmup, TrainingArguments, Trainer
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer, DataCollatorWithPadding
 from peft import PromptTuningConfig, PromptTuningInit, get_peft_model, TaskType, PeftType, get_peft_config
 import torch
 # import deepspeed
@@ -136,6 +136,11 @@ def main():
     train_dataset = tokenized_dataset['train']
     eval_dataset = tokenized_dataset['validation']
 
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer) # tokenize 미리 한거를 input 으로 넣는데 여기 tokenizer 를 왜또넣지.ㅡㅡ
+
+    def compute_metrics(eval_preds):
+        return
+
     # For reproducibility
     if args.seed is not None:
         random.seed(args.seed) # python random seed
@@ -144,11 +149,12 @@ def main():
         torch.backends.cudnn.deterministic = True # add
         torch.backends.cudnn.benchmark = False
         torch.cuda.manual_seed(args.seed) # add
-        # torch.cuda.manual_seed_all(args.seed)  # add
+        # torch.cuda.manual_seed_all(args.seed)  
         # torch.set_deterministic(True)
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
+        overwrite_output_dir=True,
         do_train=True,
         do_eval=True,
         num_train_epochs=args.epochs,
@@ -159,7 +165,8 @@ def main():
         logging_steps=args.interval,
         save_steps=args.interval, 
         seed=args.seed,
-        # deepspeed=args.dsconfig_dir
+        prediction_loss_only=True,
+        # deepspeed=args.dsconfig_dir # 이거랑 deepspeed 명령어랑 같이 사용하는건 아닌가?..
     )
 
     trainer = Trainer(
@@ -167,7 +174,9 @@ def main():
         args = training_args,
         train_dataset=train_dataset,
         eval_dataset = eval_dataset,
+        data_collator=data_collator,
         tokenizer = tokenizer,
+        # compute_metrics=compute_metrics
         # optimizers = optimizer # lr_scheduler
         # neftune_noise_alpha=5,
     )
