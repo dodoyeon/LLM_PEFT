@@ -63,7 +63,7 @@ def main():
     if os.path.exists(args.output_dir):
         args.output_dir += datetime.today().strftime('_%Y%m%d_%H%M%S')
         print('   - Output directory is changed to avoid overlapping.')
-    else:
+    else: # Trainer 에서는 mkdir 를 사용하지 않아도 자동으로 만들어준다
         pass
         
 
@@ -152,6 +152,7 @@ def main():
         do_train=True,
         do_eval=True,
         num_train_epochs=args.epochs,
+        per_device_train_batch_size=args.batch_size, 
         learning_rate=args.lr,
         evaluation_strategy="epoch",
         logging_dir='log',
