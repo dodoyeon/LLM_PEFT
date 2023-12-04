@@ -118,14 +118,22 @@ def main():
         tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
 
         dataset = dataset.map(
-            lambda examples : {'content' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
+            lambda examples : {'labels' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
             batched= True,
             remove_columns=['summary', 'id'],
             num_proc = 1)
         
+        def preprocess_func(examples):
+            model_inputs = tokenizer(examples['document'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt")
+            labels = tokenizer(examples['labels'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt")
+            labels = labels['input_ids']
+            model_inputs['labels'] = labels
+            return model_inputs
+        
         tokenized_dataset = dataset.map(
-            lambda examples : tokenizer(examples['content'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
+            preprocess_func,
             batched=True,
+            remove_columns=['document'],
             num_proc = 1)
         
     model.resize_token_embeddings(len(tokenizer)) # resize 는 반드시 get_peft_model(즉, peft를 씌우기전에) 해줘야한다!
