@@ -8,6 +8,8 @@ import torch
 import argparse
 import random
 import os
+from pathlib import Path
+import pickle
 from datetime import datetime
 
 def add_arguments():
@@ -42,6 +44,9 @@ def add_arguments():
     
     parser.add_argument("--local_rank", type=int,
                         help="Local rank. Necessary for using the torch.distributed.launch utility.")
+                        
+    parser.add_argument("--num_proc", default=4, type=int, help="the number of subprocesses for mapping dataset") # CPU 는 32개는 할수 있다고 함..
+    parser.add_argument("--tokenized_dataset_cache", default='cache/seq2seq/tokenized_dataset.pkl', help="path to tokenized dataset cache")
     
     # Include DeepSpeed configuration arguments.
     # parser = deepspeed.add_config_arguments(parser)
@@ -52,7 +57,6 @@ def add_arguments():
 
 def main():
     args = add_arguments()
-    dataset = load_dataset("EdinburghNLP/xsum")
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
                                               pad_token='<pad>')
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
@@ -79,62 +83,92 @@ def main():
     print('Device: ', device)
 
     if args.data == 'def_clm':
-        def preprocess_func(examples):
-            inputs = examples['document']
-            targets = examples['summary']
-            model_inputs = tokenizer(inputs, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt') # is_split_into_words = True,
-            labels = tokenizer(targets, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt')
-            labels = labels["input_ids"]
-            # labels[labels == tokenizer.pad_token_id] = -100 # ?
-            model_inputs["labels"] = labels
-            return model_inputs
+        if args.tokenized_dataset_cache:
+            with Path(args.tokenized_dataset_cache).open('rb') as f:
+                tokenized_dataset = pickle.load(f)
+        else:
+            dataset = load_dataset("EdinburghNLP/xsum")
 
+            def preprocess_func(examples):
+                inputs = examples['document']
+                targets = examples['summary']
+                model_inputs = tokenizer(inputs, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt') # is_split_into_words = True,
+                labels = tokenizer(targets, padding='max_length', truncation=True, max_length= args.max_length, return_tensors='pt')
+                labels = labels["input_ids"]
+                # labels[labels == tokenizer.pad_token_id] = -100 # ?
+                model_inputs["labels"] = labels
+                return model_inputs
 
-        tokenized_dataset = dataset.map(
-            preprocess_func,
-            batched=True,
-            num_proc = 1,
-            remove_columns=dataset["train"].column_names
-            )
+            tokenized_dataset = dataset.map(
+                preprocess_func,
+                batched=True,
+                num_proc = args.num_proc,
+                remove_columns=dataset["train"].column_names
+                )
+            
+            with Path(f'cache/{args.data}/tokenized_dataset.pkl').open('wb') as f:
+                pickle.dump(tokenized_dataset, f)
         
     elif args.data == 'concat':
-        # Concat inputs and targets for CLM training
-        dataset = dataset.map(
-            lambda examples : {'content' : [examples['document'][i] + examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
-            # lambda examples : {'content' : [examples['inputs_pretokenized'][i] + examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
-            batched= True,
-            remove_columns=dataset["train"].column_names,
-            num_proc = 1)
+        if args.tokenized_dataset_cache:
+            with Path(args.tokenized_dataset_cache).open('rb') as f:
+                tokenized_dataset = pickle.load(f)
 
-        tokenized_dataset = dataset.map(
-            lambda examples : tokenizer(examples['content'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
-            batched=True,
-            num_proc = 1
-            )  
+        else:
+            dataset = load_dataset("EdinburghNLP/xsum")
+
+            # Concat inputs and targets for CLM training
+            dataset = dataset.map(
+                lambda examples : {'content' : [examples['document'][i] + examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
+                # lambda examples : {'content' : [examples['inputs_pretokenized'][i] + examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
+                batched= True,
+                remove_columns=dataset["train"].column_names,
+                num_proc = args.num_proc)
+            
+            tokenized_dataset = dataset.map(
+                lambda examples : tokenizer(examples['content'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
+                batched=True,
+                num_proc = args.num_proc
+                )
+            with Path(f'cache/{args.data}/tokenized_dataset.pkl').open('wb') as f:
+                pickle.dump(tokenized_dataset, f)  
 
     elif args.data == 'seq2seq':
         # article + <sep> + summary form
         # sep 토큰 tokenizer 에 있는지 없는지 확인하기. -> 원래는 없는 듯.
         tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
+        
+        if args.tokenized_dataset_cache:
+            with Path(args.tokenized_dataset_cache).open('rb') as f:
+                tokenized_dataset = pickle.load(f)
+        else:
+            dataset = load_dataset("EdinburghNLP/xsum")
+        
+            dataset = dataset.map(
+                lambda examples : {'labels' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
+                batched= True,
+                remove_columns=['summary', 'id'],
+                num_proc = args.num_proc)
+        
+            def preprocess_func(examples):
+                model_inputs = tokenizer(examples['document'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt")
+                labels = tokenizer(examples['labels'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt")
+                labels = labels['input_ids']
+                model_inputs['labels'] = labels
+                return model_inputs
+            
+            tokenized_dataset = dataset.map(
+                preprocess_func,
+                batched=True,
+                remove_columns=['document'],
+                num_proc = args.num_proc)
 
-        dataset = dataset.map(
-            lambda examples : {'labels' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
-            batched= True,
-            remove_columns=['summary', 'id'],
-            num_proc = 1)
-        
-        def preprocess_func(examples):
-            model_inputs = tokenizer(examples['document'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt")
-            labels = tokenizer(examples['labels'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt")
-            labels = labels['input_ids']
-            model_inputs['labels'] = labels
-            return model_inputs
-        
-        tokenized_dataset = dataset.map(
-            preprocess_func,
-            batched=True,
-            remove_columns=['document'],
-            num_proc = 1)
+            cache_path = Path(f'cache/{args.data}/tokenized_dataset.pkl')
+            cache_path.mkdir(parents=True, exist_ok=True)
+            if not os.path.exists():
+                os.makedirs(f'cache/{args.data}')
+            with cache_path.open('wb') as f:
+                pickle.dump(tokenized_dataset, f)
         
     model.resize_token_embeddings(len(tokenizer)) # resize 는 반드시 get_peft_model(즉, peft를 씌우기전에) 해줘야한다!
 
@@ -174,7 +208,7 @@ def main():
         save_steps=args.interval, 
         seed=args.seed,
         prediction_loss_only=True,
-        # deepspeed=args.dsconfig_dir # 이거랑 deepspeed 명령어랑 같이 사용하는건 아닌가?..
+        deepspeed=args.dsconfig_dir # deepspeed 명령어는 run 할 때, train args 는 디버깅할 때 사용.
     )
 
     trainer = Trainer(

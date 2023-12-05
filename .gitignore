@@ -4,3 +4,7 @@ XSUM-EMNLP18-Summary-Data-Original.tar.gz
 /transformers
 /output*
 /log
+/cache
+.vscode
+.venv
+.ipynb_checkpoints
