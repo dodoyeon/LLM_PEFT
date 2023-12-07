@@ -18,7 +18,7 @@ def add_arguments():
                          help='training epoch')
     parser.add_argument('--learning_rate', '-lr', default=0.3, type=float, 
                         dest='lr', help='training learning rate') # constant lr 0.3??
-    parser.add_argument('--batch_size', '-bs', default=4, type=int,
+    parser.add_argument('--batch_size', '-bs', default=6, type=int,
                          help='training batch size')
     parser.add_argument('--vir_tok', default=30, type=int,
                         help = 'prompt, prefix tuning num_virtual_token')
@@ -81,6 +81,8 @@ def main():
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
+
+    tokenized_dataset = None
 
     if args.data == 'def_clm':
         if args.tokenized_dataset_cache:
