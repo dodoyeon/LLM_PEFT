@@ -1,7 +1,7 @@
 from datasets import load_dataset
 # from trl import SFTTrainer
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer, DataCollatorWithPadding
-from peft import PromptTuningConfig, PromptTuningInit, get_peft_model, TaskType, PeftType, get_peft_config
+from peft import PromptTuningConfig, PromptTuningInit, PrefixTuningConfig, IA3Config, get_peft_model, TaskType, PeftType, get_peft_config
 import torch
 # import deepspeed
 
@@ -20,10 +20,14 @@ def add_arguments():
                         dest='lr', help='training learning rate') # constant lr 0.3??
     parser.add_argument('--batch_size', '-bs', default=6, type=int,
                          help='training batch size')
+    
+    parser.add_argument('--peft', default='ia3', choices=['pret', 'prot', 'ia3'],
+                       help='which peft method to use - prefix tuning, prompt tuning, ia3')
     parser.add_argument('--vir_tok', default=30, type=int,
                         help = 'prompt, prefix tuning num_virtual_token')
-    parser.add_argument('--max_length', '-ml', default=994, type=int, 
+    parser.add_argument('--max_length', '-ml', default=1024, type=int, 
                          help='maximum sequence length')
+    
     parser.add_argument('--seed', type=int, default=42) 
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
@@ -31,14 +35,14 @@ def add_arguments():
     parser.add_argument('--output_dir', default='output_pt',
                         help='experiment result save directory')
     
-    parser.add_argument('--data_preprocess', default='seq2seq', choices = ['def_clm', 'concat', 'seq2seq'],
+    parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='p3')
+    parser.add_argument('--data_preprocess', default='concat', choices = ['def_clm', 'concat', 'seq2seq'],
                          dest = 'data', help='data preprocess method for Causal LM')
     parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')
     parser.add_argument('--interval', default=17004,
                         help='evaluate term')
-    parser.add_argument('--deepspeed_use', default=True,
-                       help='whether use deepspeed lib or not')
+    
     parser.add_argument('--dsconfig_dir', default= './deepspeed_config.json',
                         help='deepspeed configuration (json) file directory location')
     
@@ -46,7 +50,7 @@ def add_arguments():
                         help="Local rank. Necessary for using the torch.distributed.launch utility.")
                         
     parser.add_argument("--num_proc", default=4, type=int, help="the number of subprocesses for mapping dataset") # CPU 는 32개는 할수 있다고 함..
-    parser.add_argument("--tokenized_dataset_cache", default='cache/seq2seq/tokenized_dataset.pkl', help="path to tokenized dataset cache")
+    parser.add_argument("--tokenized_dataset_cache", default=None, help="path to tokenized dataset cache") #'cache/seq2seq/tokenized_dataset.pkl'
     
     # Include DeepSpeed configuration arguments.
     # parser = deepspeed.add_config_arguments(parser)
@@ -70,27 +74,45 @@ def main():
     else: # Trainer 에서는 mkdir 를 사용하지 않아도 자동으로 만들어준다
         pass
         
-
-    peft_config = PromptTuningConfig(
-        task_type=TaskType.CAUSAL_LM,
-        prompt_tuning_init=PromptTuningInit.TEXT, # prompt tuning embedding initial value type, 다른 종류는 RANDOM
-        num_virtual_tokens=args.vir_tok, # output prompt size (아마)
-        prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
-        tokenizer_name_or_path=args.model_name_or_path
+    if args.peft == 'pret':
+        peft_config = PrefixTuningConfig(
+        task_type=TaskType.CAUSAL_LM, # TaskType.SEQ_2_SEQ_LM, 
+        inference_mode=False, 
+        num_virtual_tokens=(args.vir_tok-10) # 20
         )
+
+        args.max_length -= args.vir_tok
+    
+    elif args.peft == 'prot':
+        peft_config = PromptTuningConfig(
+            task_type=TaskType.CAUSAL_LM,
+            prompt_tuning_init=PromptTuningInit.TEXT, # prompt tuning embedding initial value type, 다른 종류는 RANDOM
+            num_virtual_tokens=args.vir_tok, # output prompt size (아마)
+            prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
+            tokenizer_name_or_path=args.model_name_or_path
+            )
+        
+        args.max_length -= args.vir_tok
+
+    else:
+        peft_config = IA3Config(task_type=TaskType.CAUSAL_LM, 
+                        inference_mode=False, 
+                        target_modules=["k_proj", "v_proj", "down_proj"], 
+                        feedforward_modules=["down_proj"],)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
 
-    tokenized_dataset = None
+    if args.data == 'p3':
+        dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+    else:
+        dataset = load_dataset("EdinburghNLP/xsum")
 
     if args.data == 'def_clm':
         if args.tokenized_dataset_cache:
             with Path(args.tokenized_dataset_cache).open('rb') as f:
                 tokenized_dataset = pickle.load(f)
         else:
-            dataset = load_dataset("EdinburghNLP/xsum")
-
             def preprocess_func(examples):
                 inputs = examples['document']
                 targets = examples['summary']
@@ -117,8 +139,6 @@ def main():
                 tokenized_dataset = pickle.load(f)
 
         else:
-            dataset = load_dataset("EdinburghNLP/xsum")
-
             # Concat inputs and targets for CLM training
             dataset = dataset.map(
                 lambda examples : {'content' : [examples['document'][i] + examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
@@ -143,9 +163,8 @@ def main():
         if args.tokenized_dataset_cache:
             with Path(args.tokenized_dataset_cache).open('rb') as f:
                 tokenized_dataset = pickle.load(f)
+
         else:
-            dataset = load_dataset("EdinburghNLP/xsum")
-        
             dataset = dataset.map(
                 lambda examples : {'labels' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
                 batched= True,
