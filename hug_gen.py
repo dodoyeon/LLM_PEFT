@@ -177,7 +177,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--output_dir', default='C:/Users/mari970/Downloads/model.pt',
+    parser.add_argument('--output_dir', default=r'C:\Users\user\Downloads\output_20231019_090057\output_20231019_090057',
                         help='experiment result save directory')  #  output_pt_20231102_004015 , output_20231019_090057
     parser.add_argument('--max_length', '-ml', default=984, type=int, 
                         dest='max_length', help='maximum sequence length')
@@ -200,6 +200,7 @@ def main():
 
     elif args.met_choice == 'peft':
         model_chkpt = os.path.join(args.output_dir, 'model.pt')
+        # config = 
         model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
         print(f'peft trained model {args.output_dir}')
 
@@ -224,12 +225,12 @@ def main():
         print('ERROR')
     
     if args.debug:
-        # num_train_idxs = list(range(0, len(dataset), 1000))
-        # dataset = Subset(dataset, num_train_idxs)
-        # print('done')
-        # debug_gen(model, dataset, tokenizer, device, args)
-        single_gen(model, dataset, tokenizer, device, args)
+        num_train_idxs = list(range(0, len(dataset), 1000))
+        dataset = Subset(dataset, num_train_idxs)
+        print('done')
+        debug_gen(model, dataset, tokenizer, device, args)
     else:
+        # for evaluation metric like ROUGE, etc. [Not Implemented]  
         test_gen(model, dataset, tokenizer, device, args)
 
 
