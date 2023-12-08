@@ -181,10 +181,22 @@ def main():
                         help='experiment result save directory')  #  output_pt_20231102_004015 , output_20231019_090057
     parser.add_argument('--max_length', '-ml', default=984, type=int, 
                         dest='max_length', help='maximum sequence length')
+    parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--met_choice', choices=['peft', 'original'], default='peft')
     parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='p3')
     parser.add_argument('--debug', default=True)
     args = parser.parse_args()
+
+    # For reproducibility
+    if args.seed is not None:
+        random.seed(args.seed) # python random seed
+        # np.random.seed(args.seed) # numpy random seed
+        torch.manual_seed(args.seed)
+        torch.backends.cudnn.deterministic = True # add
+        torch.backends.cudnn.benchmark = False
+        torch.cuda.manual_seed(args.seed) # add
+        # torch.cuda.manual_seed_all(args.seed)  # add
+        # torch.set_deterministic(True)
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
@@ -200,12 +212,11 @@ def main():
 
     elif args.met_choice == 'peft':
         model_chkpt = os.path.join(args.output_dir, 'model.pt')
-        # config = 
         model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
         print(f'peft trained model {args.output_dir}')
 
     else:
-        print('ERROR')
+        raise NotImplementedError
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token='<pad>')
 
@@ -222,10 +233,11 @@ def main():
         print('xsum')
         
     else:
-        print('ERROR')
+        raise NotImplementedError
     
     if args.debug:
-        num_train_idxs = list(range(0, len(dataset), 1000))
+        idx_list = list(range(0, len(dataset)))
+        num_train_idxs = random.sample(idx_list, 100)
         dataset = Subset(dataset, num_train_idxs)
         print('done')
         debug_gen(model, dataset, tokenizer, device, args)
