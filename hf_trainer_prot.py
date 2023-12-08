@@ -49,7 +49,7 @@ def add_arguments():
     parser.add_argument("--local_rank", type=int,
                         help="Local rank. Necessary for using the torch.distributed.launch utility.")
                         
-    parser.add_argument("--num_proc", default=4, type=int, help="the number of subprocesses for mapping dataset") # CPU 는 32개는 할수 있다고 함..
+    parser.add_argument("--num_proc", default=16, type=int, help="the number of subprocesses for mapping dataset") # CPU 는 32개는 할수 있다고 함..
     parser.add_argument("--tokenized_dataset_cache", default=None, help="path to tokenized dataset cache") #'cache/seq2seq/tokenized_dataset.pkl'
     
     # Include DeepSpeed configuration arguments.
@@ -103,10 +103,13 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
 
-    if args.data == 'p3':
+    if args.data_choice == 'p3':
         dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
-    else:
+    elif args.data_choice == 'org_xsum':
         dataset = load_dataset("EdinburghNLP/xsum")
+
+    else:
+        raise NotImplementedError
 
     if args.data == 'def_clm':
         if args.tokenized_dataset_cache:
@@ -133,7 +136,7 @@ def main():
             with Path(f'cache/{args.data}/tokenized_dataset.pkl').open('wb') as f:
                 pickle.dump(tokenized_dataset, f)
         
-    elif args.data == 'concat':
+    elif args.data == 'concat': # p3 xsum dataset seq2seq
         if args.tokenized_dataset_cache:
             with Path(args.tokenized_dataset_cache).open('rb') as f:
                 tokenized_dataset = pickle.load(f)
@@ -141,24 +144,38 @@ def main():
         else:
             # Concat inputs and targets for CLM training
             dataset = dataset.map(
-                lambda examples : {'content' : [examples['document'][i] + examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
+                lambda examples : {'labels' : [examples['inputs_pretokenized'][i] +' <se> '+  examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
                 # lambda examples : {'content' : [examples['inputs_pretokenized'][i] + examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
                 batched= True,
-                remove_columns=dataset["train"].column_names,
+                remove_columns=['inputs', 'targets', 'targets_pretokenized'],# dataset["train"].column_names
                 num_proc = args.num_proc)
             
+            def preprocess_func(examples):
+                model_inputs = tokenizer(examples['inputs_pretokenized'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt")
+                labels = tokenizer(examples['labels'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt")
+                labels = labels['input_ids']
+                model_inputs['labels'] = labels
+                return model_inputs
+            
             tokenized_dataset = dataset.map(
-                lambda examples : tokenizer(examples['content'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
+                preprocess_func,
                 batched=True,
+                remove_columns=['inputs_pretokenized'],
                 num_proc = args.num_proc
                 )
+            
+            cache_path = Path(f'cache/{args.data}/tokenized_dataset.pkl')
+            cache_path.mkdir(parents=True, exist_ok=True)
+            if not os.path.exists():
+                os.makedirs(f'cache/{args.data}')
+
             with Path(f'cache/{args.data}/tokenized_dataset.pkl').open('wb') as f:
                 pickle.dump(tokenized_dataset, f)  
 
-    elif args.data == 'seq2seq':
+    elif args.data == 'seq2seq': # original xsum dataset seq2seq
         # article + <sep> + summary form
         # sep 토큰 tokenizer 에 있는지 없는지 확인하기. -> 원래는 없는 듯.
-        tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
+        # tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
         
         if args.tokenized_dataset_cache:
             with Path(args.tokenized_dataset_cache).open('rb') as f:
@@ -188,6 +205,7 @@ def main():
             cache_path.mkdir(parents=True, exist_ok=True)
             if not os.path.exists():
                 os.makedirs(f'cache/{args.data}')
+
             with cache_path.open('wb') as f:
                 pickle.dump(tokenized_dataset, f)
         
@@ -223,6 +241,7 @@ def main():
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size, 
         learning_rate=args.lr,
+        warmup_steps=0.001,
         evaluation_strategy="epoch",
         logging_dir='log',
         logging_steps=args.interval,

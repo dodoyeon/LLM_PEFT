@@ -68,14 +68,13 @@ def draw_graph(dir):
 def test_gen(model, dataset, tokenizer, device, args):
     model = model.to(device)
     test_loader = DataLoader(dataset, pin_memory=True)
-
     gen_dir = os.path.join(args.output_dir, 'generate.txt')
     with open(gen_dir, 'w') as f:
         f.write(f'<Generated Output>\n\n')
     if args.data_choice == 'p3':
         for step, inputs in enumerate(tqdm(test_loader)):
             input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
-            outputs = model.generate(input_ids=input_ids.to(device), 
+            outputs = model.generate(input_ids=input_ids.to(device),
                                      max_length=512,
                                      do_sample=True,
                                      repetition_penalty=0.5,
@@ -93,7 +92,6 @@ def test_gen(model, dataset, tokenizer, device, args):
                     f.write(f"{tar}\n\n")
                     f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
                     f.write('\n')
-
     elif args.data_choice == 'org_xsum':
         for step, inputs in enumerate(tqdm(test_loader)):
             input_ids = tokenizer.encode(inputs['document'][0], return_tensors='pt')
@@ -109,18 +107,15 @@ def test_gen(model, dataset, tokenizer, device, args):
                     f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
                     f.write('\n')
         print('Done')
-    
 def debug_gen(model, dataset, tokenizer, device, args):
     model = model.to(device)
     test_loader = DataLoader(dataset, pin_memory=True)
-
     gen_dir = os.path.join(args.output_dir, 'generate.txt')
     with open(gen_dir, 'w') as f:
         f.write(f'<Generated Output>\n\n')
-
     for step, inputs in enumerate(tqdm(test_loader)):
         input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
-        outputs = model.generate(input_ids=input_ids.to(device), 
+        outputs = model.generate(input_ids=input_ids.to(device),
                                     max_length=512,
                                     do_sample=True,
                                     repetition_penalty=0.5,
@@ -138,15 +133,12 @@ def debug_gen(model, dataset, tokenizer, device, args):
             f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
             f.write('\n')
     print('Done')
-
 def single_gen(model, dataset, tokenizer, device, args):
     model = model.to(device)
     test_loader = DataLoader(dataset, pin_memory=True)
-
     gen_dir = os.path.join(args.output_dir, 'generate.txt')
     # with open(gen_dir, 'w') as f:
     #     f.write(f'<Generated Output>\n\n')
-
     inputs = {'document': 'The Welsh Economy Research report showed 79% of direct spend was retained in Wales, and associations built nearly 2,000 affordable homes.\nThis was an increase of 4% on the previous year.\nThe annual report, commissioned by Community Housing Cymru, looked at the impact of social housing in Wales.\n1.1bn\ncontributed to the economy in 2014/15\n£872m of that was retained in Wales\n1,923 new homes built in 2014/15\n£301m on repairs/maintenance in 2014/15\n£532m on regeneration in 2014/15'
               , 'summary':'default'
               }
@@ -154,7 +146,7 @@ def single_gen(model, dataset, tokenizer, device, args):
               , 'summary':'default'
               }
     input_ids = tokenizer.encode(inputs['document'], return_tensors='pt')
-    outputs = model.generate(input_ids=input_ids.to(device), 
+    outputs = model.generate(input_ids=input_ids.to(device),
                                 max_length=512,
                                 do_sample=True,
                                 repetition_penalty=0.5,
@@ -162,7 +154,6 @@ def single_gen(model, dataset, tokenizer, device, args):
                                 bos_token_id=tokenizer.bos_token_id,
                                 use_cache=True
                                 )
-                                
     with open(gen_dir, 'a',encoding='UTF-8') as f:
         f.write(f"[Generated Output]\n")
         inp = inputs['document']# .encode('utf8')
@@ -172,70 +163,67 @@ def single_gen(model, dataset, tokenizer, device, args):
         f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
         f.write('\n')
     print('Done')
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
                         dest ='model_name_or_path', help='base model')
-    parser.add_argument('--output_dir', default='C:/Users/mari970/Downloads/model.pt',
-                        help='experiment result save directory')  #  output_pt_20231102_004015 , output_20231019_090057, C:\Users\mari970\Downloads\prot_concat\output_pt\model.pt
-    parser.add_argument('--max_length', '-ml', default=984, type=int, 
+    parser.add_argument('--output_dir', default=r'C:\Users\user\Downloads\output_20231019_090057\output_20231019_090057',
+                        help='experiment result save directory')  #  output_pt_20231102_004015 , output_20231019_090057
+    parser.add_argument('--max_length', '-ml', default=984, type=int,
                         dest='max_length', help='maximum sequence length')
+    parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--met_choice', choices=['peft', 'original'], default='peft')
-    parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='org_xsum')
+    parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='p3')
     parser.add_argument('--debug', default=True)
     args = parser.parse_args()
-
+    # For reproducibility
+    if args.seed is not None:
+        random.seed(args.seed) # python random seed
+        # np.random.seed(args.seed) # numpy random seed
+        torch.manual_seed(args.seed)
+        torch.backends.cudnn.deterministic = True # add
+        torch.backends.cudnn.benchmark = False
+        torch.cuda.manual_seed(args.seed) # add
+        # torch.cuda.manual_seed_all(args.seed)  # add
+        # torch.set_deterministic(True)
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # device = torch.device('cpu')
     print('Device: ', device)
-
     if args.met_choice == 'original':
         # 일반 AutoModel 로는 PEFT 로 학습한 모델을 불러올 수 없다. (당연함. Adapter 같은애들은 새로운 모듈을 추가.)
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path) 
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
         print('original trained model')
-
     elif args.met_choice == 'peft':
         model_chkpt = os.path.join(args.output_dir, 'model.pt')
         model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
         print(f'peft trained model {args.output_dir}')
-
     else:
-        print('ERROR')
-
+        raise NotImplementedError
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token='<pad>')
-
     if args.data_choice == 'p3':
         # Prefix tuning : p3-xsum 데이터셋 (사실 이거말고 일반 xsum 데이터셋을 쓰는게 맞지만 이렇게 학습시켜버려서,,)
         dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")['test']
         dataset = dataset.remove_columns(['inputs', 'targets'])
         print('p3')
-
     elif args.data_choice == 'org_xsum':
-        # Prompt tuning 
+        # Prompt tuning
         dataset = load_dataset("EdinburghNLP/xsum")['test']
         dataset = dataset.remove_columns(['id'])
         print('xsum')
-        
     else:
-        print('ERROR')
-    
+        raise NotImplementedError
     if args.debug:
-        # num_train_idxs = list(range(0, len(dataset), 1000))
-        # dataset = Subset(dataset, num_train_idxs)
-        # print('done')
-        # debug_gen(model, dataset, tokenizer, device, args)
-        single_gen(model, dataset, tokenizer, device, args)
+        idx_list = list(range(0, len(dataset)))
+        num_train_idxs = random.sample(idx_list, 100)
+        dataset = Subset(dataset, num_train_idxs)
+        print('done')
+        debug_gen(model, dataset, tokenizer, device, args)
     else:
+        # for evaluation metric like ROUGE, etc. [Not Implemented]
         test_gen(model, dataset, tokenizer, device, args)
-
-
     # os.environ['KMP_DUPLICATE_LIB_OK']='True'
-    # draw_graph(args.output_dir) 
-
-
+    # draw_graph(args.output_dir)
 if __name__ == '__main__':
     main()
