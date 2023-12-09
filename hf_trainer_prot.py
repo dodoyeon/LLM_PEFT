@@ -50,7 +50,7 @@ def add_arguments():
                         help="Local rank. Necessary for using the torch.distributed.launch utility.")
                         
     parser.add_argument("--num_proc", default=16, type=int, help="the number of subprocesses for mapping dataset") # CPU 는 32개는 할수 있다고 함..
-    parser.add_argument("--tokenized_dataset_cache", default=None, help="path to tokenized dataset cache") #'cache/seq2seq/tokenized_dataset.pkl'
+    parser.add_argument("--tokenized_dataset_cache", default=None, help="path to tokenized dataset cache") #'cache/seq2seq/tokenized_dataset.pkl', r'C:\Users\user\Downloads\concat\concat\tokenized_dataset'
     
     # Include DeepSpeed configuration arguments.
     # parser = deepspeed.add_config_arguments(parser)
@@ -103,13 +103,13 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: ', device)
 
-    if args.data_choice == 'p3':
-        dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
-    elif args.data_choice == 'org_xsum':
-        dataset = load_dataset("EdinburghNLP/xsum")
+    # if args.data_choice == 'p3':
+    #     dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+    # elif args.data_choice == 'org_xsum':
+    #     dataset = load_dataset("EdinburghNLP/xsum")
 
-    else:
-        raise NotImplementedError
+    # else:
+    #     raise NotImplementedError
 
     if args.data == 'def_clm':
         if args.tokenized_dataset_cache:
@@ -142,6 +142,9 @@ def main():
                 tokenized_dataset = pickle.load(f)
 
         else:
+            # dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+            with open(os.path.join('cache','dataset.pkl'), 'rb') as f:
+                dataset = pickle.load(f)
             # Concat inputs and targets for CLM training
             dataset = dataset.map(
                 lambda examples : {'labels' : [examples['inputs_pretokenized'][i] +' <se> '+  examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
@@ -182,6 +185,7 @@ def main():
                 tokenized_dataset = pickle.load(f)
 
         else:
+            dataset = load_dataset("EdinburghNLP/xsum")
             dataset = dataset.map(
                 lambda examples : {'labels' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
                 batched= True,
