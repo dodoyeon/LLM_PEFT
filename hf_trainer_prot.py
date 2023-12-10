@@ -213,20 +213,18 @@ def main():
                 tokenized_dataset = pickle.load(f)
 
         else:
-            # dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
-            with open(os.path.join("cache", "dataset.pkl"), "rb") as f:
-                dataset = pickle.load(f)
+            dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+            # with open(os.path.join("cache", "dataset.pkl"), "rb") as f: dataset = pickle.load(f)
             # Concat inputs and targets for CLM training!
             dataset = dataset.map(
                 lambda examples: {
                     "labels": [
                         examples["inputs_pretokenized"][i]
-                        + " <se> "
                         + examples["targets_pretokenized"][i].lstrip()
                         for i in range(len(examples["targets_pretokenized"]))
                     ]
                 },
-                # lambda examples : {'content' : [examples['inputs_pretokenized'][i] + examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
+                # lambda examples : {'content' : [examples['inputs_pretokenized'][i] + " <se> " + examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
                 batched=True,
                 remove_columns=[
                     "inputs",
