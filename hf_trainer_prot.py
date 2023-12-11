@@ -36,13 +36,13 @@ def add_arguments():
     parser.add_argument(
         "--learning_rate",
         "-lr",
-        default=0.3,
+        default=0.003, # 3e−3
         type=float,
         dest="lr",
         help="training learning rate",
     )  # constant lr 0.3??
     parser.add_argument(
-        "--batch_size", "-bs", default=6, type=int, help="training batch size"
+        "--batch_size", "-bs", default=4, type=int, help="training batch size"
     )
 
     parser.add_argument(
@@ -82,11 +82,10 @@ def add_arguments():
     parser.add_argument("--interval", default=17004, help="evaluate term")
 
     parser.add_argument(
-        "--dsconfig_dir",
+        "--deepspeed",
         default="./deepspeed_config.json",
         help="deepspeed configuration (json) file directory location",
     )
-
     parser.add_argument(
         "--local_rank",
         type=int,
@@ -154,8 +153,8 @@ def main():
         peft_config = IA3Config(
             task_type=TaskType.CAUSAL_LM,
             inference_mode=False,
-            target_modules=["k_proj", "v_proj", "down_proj"],
-            feedforward_modules=["down_proj"],
+            target_modules=["c_attn", "mlp.c_proj"],
+            feedforward_modules=["mlp.c_proj"],
         )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -260,13 +259,13 @@ def main():
                 num_proc=args.num_proc,
             )
 
-            cache_path = Path(f"cache/{args.data}/tokenized_dataset.pkl")
-            cache_path.mkdir(parents=True, exist_ok=True)
-            if not os.path.exists():
-                os.makedirs(f"cache/{args.data}")
+            # cache_path = Path(f"cache/{args.data}/tokenized_dataset.pkl")
+            # cache_path.mkdir(parents=True, exist_ok=True)
+            # if not os.path.exists():
+            #     os.makedirs(f"cache/{args.data}")
 
-            with Path(f"cache/{args.data}/tokenized_dataset.pkl").open("wb") as f:
-                pickle.dump(tokenized_dataset, f)
+            # with Path(f"cache/{args.data}/tokenized_dataset.pkl").open("wb") as f:
+            #     pickle.dump(tokenized_dataset, f)
 
     elif args.data == "seq2seq":  # original xsum dataset seq2seq
         # article + <sep> + summary form
@@ -363,14 +362,15 @@ def main():
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         learning_rate=args.lr,
-        warmup_steps=0.001,
+        warmup_steps=1000,
         evaluation_strategy="epoch",
         logging_dir="log",
         logging_steps=args.interval,
+        logging_first_step =True,
         save_steps=args.interval,
         seed=args.seed,
         prediction_loss_only=True,
-        deepspeed=args.dsconfig_dir,  # deepspeed 명령어는 run 할 때, train args 는 디버깅할 때 사용.
+        # deepspeed=args.dsconfig_dir,  # deepspeed 명령어는 run 할 때, train args 는 디버깅할 때 사용.
     )
 
     trainer = Trainer(
