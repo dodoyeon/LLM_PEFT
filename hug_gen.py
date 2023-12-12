@@ -107,6 +107,8 @@ def test_gen(model, dataset, tokenizer, device, args):
                     f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
                     f.write('\n')
         print('Done')
+
+
 def debug_gen(model, dataset, tokenizer, device, args):
     model = model.to(device)
     test_loader = DataLoader(dataset, pin_memory=True)
@@ -133,6 +135,8 @@ def debug_gen(model, dataset, tokenizer, device, args):
             f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
             f.write('\n')
     print('Done')
+
+
 def single_gen(model, dataset, tokenizer, device, args):
     model = model.to(device)
     test_loader = DataLoader(dataset, pin_memory=True)
@@ -163,6 +167,8 @@ def single_gen(model, dataset, tokenizer, device, args):
         f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
         f.write('\n')
     print('Done')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name_or_path', default= 'gpt2-large',
@@ -176,6 +182,7 @@ def main():
     parser.add_argument('--data_choice', choices=['p3', 'org_xsum'], default='p3')
     parser.add_argument('--debug', default=True)
     args = parser.parse_args()
+
     # For reproducibility
     if args.seed is not None:
         random.seed(args.seed) # python random seed
@@ -186,44 +193,57 @@ def main():
         torch.cuda.manual_seed(args.seed) # add
         # torch.cuda.manual_seed_all(args.seed)  # add
         # torch.set_deterministic(True)
+
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # device = torch.device('cpu')
     print('Device: ', device)
+
     if args.met_choice == 'original':
         # 일반 AutoModel 로는 PEFT 로 학습한 모델을 불러올 수 없다. (당연함. Adapter 같은애들은 새로운 모듈을 추가.)
         model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
         print('original trained model')
+
     elif args.met_choice == 'peft':
         model_chkpt = os.path.join(args.output_dir, 'model.pt')
         model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
         print(f'peft trained model {args.output_dir}')
+
     else:
         raise NotImplementedError
+    
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token='<pad>')
+
     if args.data_choice == 'p3':
         # Prefix tuning : p3-xsum 데이터셋 (사실 이거말고 일반 xsum 데이터셋을 쓰는게 맞지만 이렇게 학습시켜버려서,,)
         dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")['test']
         dataset = dataset.remove_columns(['inputs', 'targets'])
         print('p3')
+
     elif args.data_choice == 'org_xsum':
         # Prompt tuning
         dataset = load_dataset("EdinburghNLP/xsum")['test']
         dataset = dataset.remove_columns(['id'])
         print('xsum')
+
     else:
         raise NotImplementedError
+    
     if args.debug:
         idx_list = list(range(0, len(dataset)))
         num_train_idxs = random.sample(idx_list, 100)
         dataset = Subset(dataset, num_train_idxs)
         print('done')
         debug_gen(model, dataset, tokenizer, device, args)
+
     else:
         # for evaluation metric like ROUGE, etc. [Not Implemented]
         test_gen(model, dataset, tokenizer, device, args)
+
     # os.environ['KMP_DUPLICATE_LIB_OK']='True'
     # draw_graph(args.output_dir)
+    
 if __name__ == '__main__':
     main()

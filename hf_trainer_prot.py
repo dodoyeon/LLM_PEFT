@@ -47,7 +47,7 @@ def add_arguments():
 
     parser.add_argument(
         "--peft",
-        default="ia3",
+        default="else",
         choices=["pret", "prot", "ia3"],
         help="which peft method to use - prefix tuning, prompt tuning, ia3",
     )
@@ -63,7 +63,7 @@ def add_arguments():
 
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("-save_mode", type=str, choices=["all", "best"], default="best")
-    parser.add_argument("--model_name_or_path", default="gpt2-large", help="base model")
+    parser.add_argument("--model_name_or_path", default="meta-llama/Llama-2-7b-chat-hf", help="base model") # gpt2-large
     parser.add_argument(
         "--output_dir", default="output_pt", help="experiment result save directory"
     )
@@ -115,8 +115,8 @@ def add_arguments():
 def main():
     args = add_arguments()
     tokenizer = AutoTokenizer.from_pretrained(
-        args.model_name_or_path, pad_token="<pad>"
-    )
+        args.model_name_or_path
+    )# , pad_token="<pad>"
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
 
     # torch.cuda.set_device(0)
@@ -149,13 +149,16 @@ def main():
 
         args.max_length -= args.vir_tok
 
-    else:
+    elif args.peft == "ia3":
         peft_config = IA3Config(
             task_type=TaskType.CAUSAL_LM,
             inference_mode=False,
             target_modules=["c_attn", "mlp.c_proj"],
             feedforward_modules=["mlp.c_proj"],
         )
+    
+    else:
+        pass
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device: ", device)
@@ -212,15 +215,13 @@ def main():
                 tokenized_dataset = pickle.load(f)
 
         else:
-            dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
+            # dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
             # with open(os.path.join("cache", "dataset.pkl"), "rb") as f: dataset = pickle.load(f)
             # Concat inputs and targets for CLM training!
             dataset = dataset.map(
                 lambda examples: {
                     "labels": [
-                        examples["inputs_pretokenized"][i]
-                        + examples["targets_pretokenized"][i].lstrip()
-                        for i in range(len(examples["targets_pretokenized"]))
+                        examples["inputs_pretokenized"][i] + examples["targets_pretokenized"][i].lstrip() for i in range(len(examples["targets_pretokenized"]))
                     ]
                 },
                 # lambda examples : {'content' : [examples['inputs_pretokenized'][i] + " <se> " + examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
@@ -282,7 +283,7 @@ def main():
                 lambda examples: {
                     "labels": [
                         examples["document"][i]
-                        + " <sep> "
+                        + " <se> "
                         + examples["summary"][i].lstrip()
                         for i in range(len(examples["summary"]))
                     ]
@@ -326,12 +327,10 @@ def main():
             with cache_path.open("wb") as f:
                 pickle.dump(tokenized_dataset, f)
 
-    model.resize_token_embeddings(
-        len(tokenizer)
-    )  # resize 는 반드시 get_peft_model(즉, peft를 씌우기전에) 해줘야한다!
+    model.resize_token_embeddings(len(tokenizer))  # resize 는 반드시 get_peft_model(즉, peft를 씌우기전에) 해줘야한다!
 
-    model = get_peft_model(model, peft_config)
-    model.print_trainable_parameters()
+    # model = get_peft_model(model, peft_config)
+    # model.print_trainable_parameters()
 
     train_dataset = tokenized_dataset["train"]
     eval_dataset = tokenized_dataset["validation"]
