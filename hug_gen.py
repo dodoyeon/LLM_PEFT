@@ -67,22 +67,31 @@ def use_instructed():
     print('  -Dataset p3 xsum instructed dataset')
     return dataset
 
-# To use same index of original and instructed(p3) xsum dataset
-def make_instructed():
+
+"""
+The index of original and instructed(p3) xsum dataset not same for prompt, prefix, ia3 PEFT.
+To solve, add instruction 'Summarize this document:' to original xsum dataset.
+Prompt and Prefix tuning dont need text instruction(prompt) they use instead tensor prompt!
+"""
+
+def make_instructed(args):
     if args.data_choice == 'p3':
         pass
 
     elif args.data_choice == 'xsum':
-        # Prompt tuning
-        dataset = load_dataset("EdinburghNLP/xsum")['test']
+        def preprocess_func(examples):
+            sep1= "Summarize this document: "
+            sep2= "\nSummary: "
+            examples[]
+
         dataset = dataset.map(
-            preprocess,
+            preprocess_func,
             batched=True,
             num_proc=args.num_proc,
             remove_columns=['id'] 
         )
 
-    print("  -Making original xsum dataset same with P3 xsum by adding 'Summarize:' instruction, 'summary: ' separate token(?)")
+    print("  -Making original xsum dataset same with P3 xsum by adding 'Summarize this document:' instruction, 'Summary: ' separate token(?)")
     return dataset
 
 
@@ -98,6 +107,7 @@ def main():
     parser.add_argument('--met_choice', default='original', choices=['peft', 'original'])
     parser.add_argument('--data_choice', default='xsum', choices=['p3', 'xsum'])
     parser.add_argument('--debug', default=True)
+    parser.add_argument('--num_proc', default=16, help='The number of process of mapping preprocess')
     args = parser.parse_args()
 
     # For reproducibility
