@@ -156,9 +156,7 @@ def pre_seq2seq(args, tokenizer, dataset):
     dataset = dataset.map(
         lambda examples: {
             "labels": [
-                examples["document"][i]
-                + " <se> "
-                + examples["summary"][i].lstrip()
+                examples["document"][i] + " <se> " + examples["summary"][i].lstrip()
                 for i in range(len(examples["summary"]))
             ]
         },

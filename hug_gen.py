@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM, default_data_collator
 from peft import AutoPeftModelForCausalLM
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Dataset, Subset
 from datasets import load_dataset
 import torch
 
@@ -71,21 +71,20 @@ def make_instructed(dataset, args):
         print('  - Using dataset p3 xsum instructed dataset')
 
     elif args.data_choice == 'xsum':
-        def preprocess_func(examples):
-            inst= "Summarize this document: "
-            sep= "\nSummary: "
-            inputs = examples['document']
-            examples['document'] = inst+inputs+sep
-            # return examples -> 필요 없을 거 같다
+        inst= "Summarize this document: "
+        sep= "\nSummary: "
 
         dataset = dataset.map(
-            preprocess_func,
+            lambda examples: {
+                "labels": [
+                    inst + examples["document"][i] + sep for i in range(len(examples["summary"]))
+            ]},
             batched=True,
             num_proc=args.num_proc,
-            remove_columns=dataset.dataset.column_names 
+            remove_columns=['id']
         )
 
-        print("  -Making original xsum dataset same with P3 xsum by adding 'Summarize this document:' instruction, 'Summary: ' separate token(?)")
+        print("  - Making original xsum dataset same with P3 xsum by adding 'Summarize this document:' instruction, 'Summary: ' separate token(?)")
     return dataset
 
 def set_single_model(args):
@@ -119,28 +118,25 @@ def set_single_model(args):
 
 def set_multi_model(args):
     dataset = load_dataset('EdinburghNLP/xsum')['test']
-    
+    # IA3 는 instruct 를 추가해줘야한다.
+    dataset2 = make_instructed(dataset, args)
+
     idx_list = list(range(0, len(dataset)))
     num_train_idxs = random.sample(idx_list, 100)
     dataset = Subset(dataset, num_train_idxs)
     print('  - Dataset sampling randomly for generation')
 
-    # IA3 는 instruct 를 추가해줘야한다.
-    dataset2 = make_instructed(dataset, args)
-
     # Prefix tuning model
-    model_chkpt = ''
+    model_chkpt = os.path.join('C:/Users/mari970/Desktop/pret_concat/output_20231019_090057', 'model.pt')
     model1 = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
 
     # Prompt tuning model
-    model_chkpt = ''
+    model_chkpt = os.path.join('C:/Users/mari970/Desktop/prot_concat/output_pt', 'model.pt')
     model2 = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
 
-    # (IA)3 model
-    model_chkpt = ''
-    model3 = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
+    tokenizer = AutoTokenizer.from_pretrained(model_chkpt)
 
-    return dataset, dataset2, model1, model2, model3 
+    return dataset, dataset2, model1, model2, tokenizer
 
 def test_single(model, dataset, tokenizer, device, args):
     model = model.to(device)
@@ -186,9 +182,10 @@ def test_single(model, dataset, tokenizer, device, args):
                     f.write('\n')
         print('Done')
 
-def test_multi(dataset, dataset2, model1, model2, model3, tokenizer, device, args):
+def test_multi(dataset, dataset2, model1, model2, tokenizer, device, args):
     xsum_loader = DataLoader(dataset, pin_memory=True)
     p3_loader = DataLoader(dataset2, pin_memory=True)
+    out_dict_list = []
     gen_dir = os.path.join(args.output_dir, 'generate.txt')
     with open(gen_dir, 'w') as f:
         f.write(f'<Generated Output>\n\n')
@@ -204,27 +201,25 @@ def test_multi(dataset, dataset2, model1, model2, model3, tokenizer, device, arg
                                     bos_token_id=tokenizer.bos_token_id,
                                     use_cache=True
                                     )
-        with open(gen_dir, 'a',encoding='UTF-8') as f:
-            f.write(f"[{step}th Generated Output]\n")
-            inp = inputs['inputs_pretokenized'][0]# .encode('utf8')
-            f.write(f"{inp}\n\n")
-            tar = inputs['targets_pretokenized'][0]# .encode('utf8')
-            f.write(f"{tar}\n\n")
-            f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
-            f.write('\n')
+        out_dict = {'Article':inputs, 'pret_out': pret_out, 'prot_out':prot_out}
+        out_dict_list.append(out_dict)
 
+    # (IA)3 model
+    model_chkpt = r'C:\Users\mari970\Downloads\dyoen\dyoen\LLM_PEFT\output_pt_20231210_163501_ia3\checkpoint-119028'
+    model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
 
-    for step, inputs in enumerate(tqdm(test_loader)):
+    for step, inputs in enumerate(tqdm(p3_loader)):
         input_ids = tokenizer.encode(inputs['document'][0], return_tensors='pt')
         outputs = model.generate(input_ids=input_ids.to(device), max_new_tokens=10) # return_full_text=False
-        with open(gen_dir, 'a',encoding='UTF-8') as f:
-            f.write(f"[{step}th Generated Output]\n")
-            inp = inputs['document'][0]
-            f.write(f"{inp}\n\n")
-            tar = inputs['summary'][0]
-            f.write(f"{tar}\n\n")
-            f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
-            f.write('\n')
+
+    with open(gen_dir, 'a',encoding='UTF-8') as f:
+        f.write(f"[{step}th Generated Output]\n")
+        inp = inputs['document'][0]
+        f.write(f"{inp}\n\n")
+        tar = inputs['summary'][0]
+        f.write(f"{tar}\n\n")
+        f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
+        f.write('\n')
 
 def main():
     parser = argparse.ArgumentParser()
@@ -256,12 +251,11 @@ def main():
         os.makedirs(args.output_dir)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # device = torch.device('cpu')
     print('Device: ', device)
 
     if args.met_choice == 'multi':
-        dataset, dataset2, model1, model2, model3, tokenizer = set_multi_model(args)
-        test_multi(dataset, dataset2, model1, model2, model3, tokenizer)
+        dataset, dataset2, model1, model2, tokenizer = set_multi_model(args)
+        test_multi(dataset, dataset2, model1, model2, tokenizer, device)
 
     else:
         dataset, model, tokenizer = set_single_model(args)
