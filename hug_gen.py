@@ -186,8 +186,45 @@ def test_single(model, dataset, tokenizer, device, args):
                     f.write('\n')
         print('Done')
 
-def test_multi(dataset, dataset2, model1, model2, model3, tokenizer):
-    pass
+def test_multi(dataset, dataset2, model1, model2, model3, tokenizer, device, args):
+    xsum_loader = DataLoader(dataset, pin_memory=True)
+    p3_loader = DataLoader(dataset2, pin_memory=True)
+    gen_dir = os.path.join(args.output_dir, 'generate.txt')
+    with open(gen_dir, 'w') as f:
+        f.write(f'<Generated Output>\n\n')
+    
+    # 3개 모델에 대해서 generate 를 돌려야 하는데 3번 for 문을 돌리는 것이 효율적인지 아니면 한번에 2개 모델에 넣어서 생성을 만드는 것이 나은지
+    for step, inputs in enumerate(tqdm(xsum_loader)):
+        input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
+        outputs = model.generate(input_ids=input_ids.to(device),
+                                    max_length=512,
+                                    do_sample=True,
+                                    repetition_penalty=0.5,
+                                    eos_token_id= tokenizer.eos_token_id,
+                                    bos_token_id=tokenizer.bos_token_id,
+                                    use_cache=True
+                                    )
+        with open(gen_dir, 'a',encoding='UTF-8') as f:
+            f.write(f"[{step}th Generated Output]\n")
+            inp = inputs['inputs_pretokenized'][0]# .encode('utf8')
+            f.write(f"{inp}\n\n")
+            tar = inputs['targets_pretokenized'][0]# .encode('utf8')
+            f.write(f"{tar}\n\n")
+            f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
+            f.write('\n')
+
+
+    for step, inputs in enumerate(tqdm(test_loader)):
+        input_ids = tokenizer.encode(inputs['document'][0], return_tensors='pt')
+        outputs = model.generate(input_ids=input_ids.to(device), max_new_tokens=10) # return_full_text=False
+        with open(gen_dir, 'a',encoding='UTF-8') as f:
+            f.write(f"[{step}th Generated Output]\n")
+            inp = inputs['document'][0]
+            f.write(f"{inp}\n\n")
+            tar = inputs['summary'][0]
+            f.write(f"{tar}\n\n")
+            f.write(f"{tokenizer.decode(outputs[0,:].tolist())}\n\n")
+            f.write('\n')
 
 def main():
     parser = argparse.ArgumentParser()
