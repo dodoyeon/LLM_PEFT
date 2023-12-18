@@ -11,6 +11,7 @@ import random
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
+import json
 
 def draw_graph(dir):
     tr = os.path.join(dir, 'tr_result.txt')
@@ -208,12 +209,13 @@ def test_multi(dataset, dataset2, device, args):
     # -> 생각하기 귀찮으니까 그냥 따로따로 하자..
 
     # Prefix tuning model
-    model_chkpt = os.path.join('C:/Users/mari970/Desktop/pret_concat/output_20231019_090057', 'model.pt')
+    model_chkpt = os.path.join('pret_concat/output_20231019_090057', 'model.pt')
     model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
-    tokenizer = AutoTokenizer.from_pretrained(model_chkpt)
+    model.to(device)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token='<pad>')
 
     for step, inputs in enumerate(tqdm(xsum_loader)):
-        input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
+        input_ids = tokenizer.encode(inputs['document'][0], truncation=True, return_tensors='pt') 
         outputs = model.generate(input_ids=input_ids.to(device),
                                     max_length=512,
                                     do_sample=True,
@@ -222,16 +224,16 @@ def test_multi(dataset, dataset2, device, args):
                                     bos_token_id=tokenizer.bos_token_id,
                                     use_cache=True
                                     )
-        out_dict = {'Article':inputs, 'pret_out': outputs}
+        out_dict = {'Article':inputs['document'][0], 'target': inputs['summary'][0], 'pret_out': tokenizer.decode(outputs[0,:].tolist())}
         out_dict_list.append(out_dict)
 
     # Prompt tuning model
-    model_chkpt = os.path.join('C:/Users/mari970/Desktop/prot_concat/output_pt', 'model.pt')
+    model_chkpt = os.path.join('prot_concat/output_pt', 'model.pt')
     model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
-    tokenizer = AutoTokenizer.from_pretrained(model_chkpt)
-    
+    model.to(device)
+
     for step, inputs in enumerate(tqdm(xsum_loader)):
-        input_ids = tokenizer.encode(inputs['inputs_pretokenized'][0], return_tensors='pt')
+        input_ids = tokenizer.encode(inputs['document'][0], truncation=True, return_tensors='pt')
         outputs = model.generate(input_ids=input_ids.to(device),
                                     max_length=512,
                                     do_sample=True,
@@ -240,20 +242,28 @@ def test_multi(dataset, dataset2, device, args):
                                     bos_token_id=tokenizer.bos_token_id,
                                     use_cache=True
                                     )
-        out_dict_list[step]['prot_out'] = outputs
+        out_dict_list[step]['prot_out'] = tokenizer.decode(outputs[0,:].tolist())
 
     # (IA)3 model
-    model_chkpt = r'C:\Users\mari970\Downloads\dyoen\dyoen\LLM_PEFT\output_pt_20231210_163501_ia3\checkpoint-119028'
+    model_chkpt = 'ia3_concat/LLM_PEFT/output_pt_20231210_163501_ia3/checkpoint-119028'
     model = AutoPeftModelForCausalLM.from_pretrained(model_chkpt)
-    tokenizer = AutoTokenizer.from_pretrained(model_chkpt)
+    model.to(device)
 
     for step, inputs in enumerate(tqdm(p3_loader)):
-        input_ids = tokenizer.encode(inputs['document'][0], return_tensors='pt')
-        outputs = model.generate(input_ids=input_ids.to(device), max_new_tokens=10) # return_full_text=False
+        input_ids = tokenizer.encode(inputs['document'][0], truncation=True, return_tensors='pt')
+        outputs = model.generate(input_ids=input_ids.to(device),
+                                    max_length=512,
+                                    do_sample=True,
+                                    repetition_penalty=0.5,
+                                    eos_token_id= tokenizer.eos_token_id,
+                                    bos_token_id=tokenizer.bos_token_id,
+                                    use_cache=True
+                                    )
 
-        out_dict_list[step]['ia3_out'] = outputs
+        out_dict_list[step]['ia3_out'] = tokenizer.decode(outputs[0,:].tolist())
 
     save_json(args, out_dict_list)
+    print('  - Generation Done')
 
 def main():
     parser = argparse.ArgumentParser()
@@ -281,12 +291,13 @@ def main():
         # torch.cuda.manual_seed_all(args.seed)  # add
         # torch.set_deterministic(True)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     print('Device: ', device)
 
     if args.met_choice == 'multi':
         dataset, dataset2 = set_multi(args)
-        test_multi(dataset, dataset2, device)
+        test_multi(dataset, dataset2, device,args)
 
     else:
         dataset, model, tokenizer = set_single_model(args)

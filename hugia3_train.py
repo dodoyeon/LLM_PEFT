@@ -126,8 +126,7 @@ def main():
                         target_modules=["k_proj", "v_proj", "down_proj"], 
                         feedforward_modules=["down_proj"],)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
-                                              pad_token='<pad>')
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,pad_token='<pad>')
     
     model = LlamaForCausalLM.from_pretrained(args.model_name_or_path)
     # model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)

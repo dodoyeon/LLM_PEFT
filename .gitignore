@@ -6,6 +6,10 @@ XSUM-EMNLP18-Summary-Data-Original.tar.gz
 /log
 /cache
 /cach
+/prot_*
+/pret_*
+/ia3_*
+/generate*
 .vscode
 .venv
 .ipynb_checkpoints
