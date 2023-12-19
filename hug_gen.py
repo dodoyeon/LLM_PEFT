@@ -104,7 +104,7 @@ def make_instructed(dataset, args):
 
         dataset = dataset.map(
             lambda examples: {
-                "labels": [
+                "document": [
                     inst + examples["document"][i] + sep for i in range(len(examples["summary"]))
             ]},
             batched=True,
@@ -146,12 +146,16 @@ def set_single_model(args):
 
 def set_multi(args):
     dataset = load_dataset('EdinburghNLP/xsum')['test']
+    # dataset = sorted(dataset, key=lambda x : x['id'])
     # IA3 는 instruct 를 추가해줘야한다.
     dataset2 = make_instructed(dataset, args)
 
-    idx_list = list(range(0, len(dataset)))
-    num_train_idxs = random.sample(idx_list, 100)
+    # idx_list = list(range(0, len(dataset))) # random data sampling
+    # num_train_idxs = random.sample(idx_list, 100) 
+    num_train_idxs =  list(range(0, 1)) 
     dataset = Subset(dataset, num_train_idxs)
+    dataset2 = Subset(dataset2, num_train_idxs
+                      )
     print('  - Dataset sampling randomly for generation')
 
     return dataset, dataset2
@@ -215,13 +219,18 @@ def test_multi(dataset, dataset2, device, args):
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token='<pad>')
 
     for step, inputs in enumerate(tqdm(xsum_loader)):
-        input_ids = tokenizer.encode(inputs['document'][0], truncation=True, return_tensors='pt') 
+        input_ids = tokenizer.encode(inputs['document'][0], 
+                                     max_length=(1024-model._peft_config['default'].num_virtual_tokens), 
+                                     truncation=True, 
+                                     return_tensors='pt')
+        
         outputs = model.generate(input_ids=input_ids.to(device),
-                                    max_length=512,
+                                    max_length=(1024-model._peft_config['default'].num_virtual_tokens),
                                     do_sample=True,
                                     repetition_penalty=0.5,
                                     eos_token_id= tokenizer.eos_token_id,
                                     bos_token_id=tokenizer.bos_token_id,
+                                    pad_token_id=tokenizer.pad_token_id,
                                     use_cache=True
                                     )
         out_dict = {'Article':inputs['document'][0], 'target': inputs['summary'][0], 'pret_out': tokenizer.decode(outputs[0,:].tolist())}
@@ -233,13 +242,18 @@ def test_multi(dataset, dataset2, device, args):
     model.to(device)
 
     for step, inputs in enumerate(tqdm(xsum_loader)):
-        input_ids = tokenizer.encode(inputs['document'][0], truncation=True, return_tensors='pt')
+        input_ids = tokenizer.encode(inputs['document'][0],
+                                     max_length=1024-model._peft_config['default'].num_virtual_tokens, 
+                                     truncation=True, 
+                                     return_tensors='pt')
+        
         outputs = model.generate(input_ids=input_ids.to(device),
-                                    max_length=512,
+                                    max_length=(1024-model._peft_config['default'].num_virtual_tokens),
                                     do_sample=True,
                                     repetition_penalty=0.5,
                                     eos_token_id= tokenizer.eos_token_id,
                                     bos_token_id=tokenizer.bos_token_id,
+                                    pad_token_id=tokenizer.pad_token_id,
                                     use_cache=True
                                     )
         out_dict_list[step]['prot_out'] = tokenizer.decode(outputs[0,:].tolist())
@@ -252,11 +266,12 @@ def test_multi(dataset, dataset2, device, args):
     for step, inputs in enumerate(tqdm(p3_loader)):
         input_ids = tokenizer.encode(inputs['document'][0], truncation=True, return_tensors='pt')
         outputs = model.generate(input_ids=input_ids.to(device),
-                                    max_length=512,
+                                    max_length=1024,
                                     do_sample=True,
                                     repetition_penalty=0.5,
                                     eos_token_id= tokenizer.eos_token_id,
                                     bos_token_id=tokenizer.bos_token_id,
+                                    pad_token_id=tokenizer.pad_token_id,
                                     use_cache=True
                                     )
 
@@ -291,8 +306,8 @@ def main():
         # torch.cuda.manual_seed_all(args.seed)  # add
         # torch.set_deterministic(True)
 
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cpu')
     print('Device: ', device)
 
     if args.met_choice == 'multi':
