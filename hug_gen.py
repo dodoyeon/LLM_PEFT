@@ -233,7 +233,9 @@ def test_multi(dataset, dataset2, device, args):
                                     pad_token_id=tokenizer.pad_token_id,
                                     use_cache=True
                                     )
-        out_dict = {'Article':inputs['document'][0], 'target': inputs['summary'][0], 'pret_out': tokenizer.decode(outputs[0,:].tolist())}
+        out_dict = {'Article':inputs['document'][0], 
+                    'target': inputs['summary'][0], 
+                    'pret_out': tokenizer.decode(outputs[0,len(input_ids[0,:]):].tolist())}
         out_dict_list.append(out_dict)
 
     # Prompt tuning model
@@ -256,7 +258,7 @@ def test_multi(dataset, dataset2, device, args):
                                     pad_token_id=tokenizer.pad_token_id,
                                     use_cache=True
                                     )
-        out_dict_list[step]['prot_out'] = tokenizer.decode(outputs[0,:].tolist())
+        out_dict_list[step]['prot_out'] = tokenizer.decode(outputs[0, len(input_ids[0,:]):].tolist())
 
     # (IA)3 model
     model_chkpt = 'ia3_concat/LLM_PEFT/output_pt_20231210_163501_ia3/checkpoint-119028'
@@ -275,7 +277,7 @@ def test_multi(dataset, dataset2, device, args):
                                     use_cache=True
                                     )
 
-        out_dict_list[step]['ia3_out'] = tokenizer.decode(outputs[0,:].tolist())
+        out_dict_list[step]['ia3_out'] = tokenizer.decode(outputs[0, len(input_ids[0,:]):].tolist())
 
     save_json(args, out_dict_list)
     print('  - Generation Done')

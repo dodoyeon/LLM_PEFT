@@ -1,5 +1,5 @@
 from transformers import GPT2Tokenizer, AutoTokenizer, GPT2Model, AutoModelForCausalLM, get_linear_schedule_with_warmup, default_data_collator
-from peft import PrefixTuningConfig, get_peft_model, TaskType # 따로 peft install 해야함
+from peft import PromptTuningConfig, PromptTuningInit, PrefixTuningConfig, get_peft_model, TaskType
 from datasets import load_dataset
 from torch.utils.data import DataLoader, Subset
 # from datasets.dataset_dict import DatasetDict
@@ -83,6 +83,10 @@ def main():
                         dest='lr', help='training learning rate')
     parser.add_argument('--batch-size', '-bs', default=4, type=int,
                         dest='batch_size', help='training batch size')
+    parser.add_argument('--vir_tok', default=30, type=int,
+                        help = 'prompt, prefix tuning num_virtual_token')
+    parser.add_argument('--peft', default='prot', type=str, choice=['pret', 'prot'],
+                        help='peft method choice prefix or prompt tuning')
     parser.add_argument('--max_length', '-ml', default=1004, type=int, # 1024 인데 prefix length=20 이라서,
                         dest='max_length', help='maximum sequence length')
     parser.add_argument('--seed', type=int, default=42) # 허깅페이스 사용하면 굳이 seed 고정할 필요가 없나??
@@ -96,6 +100,8 @@ def main():
                         dest = 'data', help='data preprocess method for Causal LM')
     parser.add_argument('--debug', default=False, 
                         help='data sampling with Subset for debugging')
+    parser.add_argument('--n_proc', type=int, default=16,
+                        help='.map function for data preprocess num of process')
     parser.add_argument('--interval', default=17004,
                         help='evaluate term')
     args = parser.parse_args()
@@ -122,11 +128,20 @@ def main():
         os.makedirs(args.output_dir)
         print('   - Output directory is changed to avoid overlapping.')
 
-    peft_config = PrefixTuningConfig(
-        task_type=TaskType.CAUSAL_LM, # TaskType.SEQ_2_SEQ_LM, 
-        inference_mode=False, 
-        num_virtual_tokens=20
-    )
+    if args.peft == 'prot':
+        peft_config = PromptTuningConfig(
+            task_type=TaskType.CAUSAL_LM,
+            prompt_tuning_init=PromptTuningInit.TEXT, # prompt tuning embedding initial value type, 다른 종류는 RANDOM
+            num_virtual_tokens=args.vir_tok, # output prompt size (아마)
+            prompt_tuning_init_text="Summarize the following article with 1 sentence: ", # 프롬프트 초기화
+            tokenizer_name_or_path=args.model_name_or_path,
+            )
+    elif args.peft == 'pret':
+        peft_config = PrefixTuningConfig(
+            task_type=TaskType.CAUSAL_LM, # TaskType.SEQ_2_SEQ_LM, 
+            inference_mode=False, 
+            num_virtual_tokens=20
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path,
                                               pad_token='<pad>') # -> 이걸하면 vocab size 가 커져서 Index out of range 문제가 뜬다.
@@ -156,23 +171,41 @@ def main():
         tokenized_dataset = dataset.map(
             preprocess_func,
             batched=True,
-            num_proc = 1,
+            num_proc = args.n_proc,
             remove_columns=dataset["train"].column_names
             )
         
     elif args.data == 'concat':
-        # Concat inputs and targets for CLM training 
+        # Concat inputs and targets for CLM training
+        sep= "\nSummary: " 
         dataset = dataset.map(
-        lambda x : {'sent_forclm' : [x['document'][i] + x['summary'][i].lstrip() for i in range(len(x['summary']))]},
+        lambda x : {'sent_forclm' : [x['document'][i] + sep +  x['summary'][i].lstrip() for i in range(len(x['summary']))]},
         batched= True,
         remove_columns=dataset["train"].column_names,
-        num_proc = 1)
+        num_proc = args.n_proc)
 
         tokenized_dataset = dataset.map(
             lambda examples : tokenizer(examples['sent_forclm'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
             batched=True,
-            num_proc = 1
-            )   
+            num_proc = args.n_proc
+            )
+        
+    elif args.data == 'seq2seq':
+        # article + <sep> + summary form
+        # sep 토큰 tokenizer 에 있는지 없는지 확인하기. -> 원래는 없는 듯.
+        tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
+        a = 0
+
+        dataset = dataset.map(
+            lambda examples : {'content' : [examples['document'][i] +' <sep> '+ examples['summary'][i].lstrip() for i in range(len(examples['summary']))]},
+            batched= True,
+            remove_columns=['summary', 'id'],
+            num_proc = args.n_proc)
+        
+        tokenized_dataset = dataset.map(
+            lambda examples : tokenizer(examples['content'], padding='max_length', max_length=args.max_length, truncation=True, return_tensors="pt"),
+            batched=True,
+            num_proc = args.n_proc)
     
     # For debugging
     if args.debug:
