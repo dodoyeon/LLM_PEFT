@@ -1,4 +1,4 @@
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 
 # from trl import SFTTrainer
 from transformers import (
@@ -28,7 +28,7 @@ import os
 from pathlib import Path
 import pickle
 from datetime import datetime
-
+import json
 
 def set_peft_config(args):
     if args.peft == "pret":
@@ -158,18 +158,18 @@ def pre_seq2seq(args, tokenizer, dataset):
     dataset = dataset.map(
         lambda examples: {
             "labels": [
-                examples["document"][i] + sep + examples["summary"][i].lstrip()
-                for i in range(len(examples["summary"]))
+                examples["article"][i] + sep + examples["one_sent_sum"][i].lstrip() # document, summary
+                for i in range(len(examples["one_sent_sum"]))
             ]
         },
         batched=True,
-        remove_columns=["summary", "id"],
+        remove_columns=["one_sent_sum", "id"],
         num_proc=args.num_proc,
     )
 
     def preprocess_func(examples):
         model_inputs = tokenizer(
-            examples["document"],
+            examples["article"], # document
             padding="max_length",
             max_length=args.max_length,
             truncation=True,
@@ -189,7 +189,7 @@ def pre_seq2seq(args, tokenizer, dataset):
     tokenized_dataset = dataset.map(
         preprocess_func,
         batched=True,
-        remove_columns=["document"],
+        remove_columns=["article"], # document
         num_proc=args.num_proc,
     )
     if args.cached:
@@ -231,7 +231,7 @@ def add_arguments():
     parser.add_argument(
         "--output_dir", default="output_pt", help="experiment result save directory"
     )
-    parser.add_argument("--data_choice", default="xsum", choices=["p3", "org_xsum", "dataset.pkl"])
+    parser.add_argument("--data_choice", default="gemini_new.json", choices=["p3", "org_xsum", "dataset.pkl", "gemini_new.json"])
     parser.add_argument(
         "--data_preprocess",
         default="seq2seq",
@@ -318,31 +318,43 @@ def main():
     elif args.data_choice == "dataset.pkl":
         with open(os.path.join("cache", args.data_choice), "rb") as f: 
             dataset = pickle.load(f)
+    
+    elif args.data_choice == "gemini_new.json":
+        train_dataset = load_dataset('json', field='train', data_files='resum.json')['train']
+        eval_dataset = load_dataset('json', field='test', data_files='resum.json',)['train']
+        # with open('resum.json') as f:
+        #     dataset = json.load(f)
+        #     dataset = Dataset.from_dict(dataset) # 이러면 오류남.
     else:
         pass
 
-    if args.data == "def_clm":
-        tokenized_dataset = pre_def_clm(args, tokenizer, dataset)
-
-    elif args.data == "concat":  # p3 xsum dataset seq2seq
-        tokenized_dataset = pre_concat(args, tokenizer, dataset)
-
-    elif args.data == "seq2seq":  # original xsum dataset seq2seq
-        tokenized_dataset = pre_seq2seq(args, tokenizer, dataset)
-
-    elif args.data == "cached":
-        with Path(args.tokenized_dataset_cache).open("rb") as f:
-            tokenized_dataset = pickle.load(f)
+    if args.data_choice == "gemini_new.json":
+        train_dataset = pre_seq2seq(args, tokenizer, train_dataset)
+        eval_dataset = pre_seq2seq(args, tokenizer, eval_dataset)
     else:
-        raise NotImplementedError
+        if args.data == "def_clm":
+            tokenized_dataset = pre_def_clm(args, tokenizer, dataset)
+
+        elif args.data == "concat":  # p3 xsum dataset seq2seq
+            tokenized_dataset = pre_concat(args, tokenizer, dataset)
+
+        elif args.data == "seq2seq":  # original xsum dataset seq2seq
+            tokenized_dataset = pre_seq2seq(args, tokenizer, dataset)
+
+        elif args.data == "cached":
+            with Path(args.tokenized_dataset_cache).open("rb") as f:
+                tokenized_dataset = pickle.load(f)
+        else:
+            raise NotImplementedError
+        
+        train_dataset = tokenized_dataset["train"]
+        eval_dataset = tokenized_dataset["validation"]
 
     model.resize_token_embeddings(len(tokenizer))  # resize 는 반드시 get_peft_model(즉, peft를 씌우기전에) 해줘야한다!
 
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    train_dataset = tokenized_dataset["train"]
-    eval_dataset = tokenized_dataset["validation"]
 
     data_collator = DataCollatorWithPadding(
         tokenizer=tokenizer
