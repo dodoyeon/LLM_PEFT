@@ -136,27 +136,34 @@ def set_single_model(args):
     elif args.data_choice == 'xsum':
         dataset = load_dataset('EdinburghNLP/xsum')['test']
 
-    idx_list = list(range(0, len(dataset)))
-    num_train_idxs = random.sample(idx_list, 100)
-    dataset = Subset(dataset, num_train_idxs)
-    print('  - Dataset sampling randomly for generation')
+    if args.data_sample == 'random':
+        num_data = 100
+        idx_list = list(range(0, len(dataset)))
+        num_train_idxs = random.sample(idx_list, num_data)
+        dataset = Subset(dataset, num_train_idxs)
+        print('  - Dataset sampling randomly for generation')
 
     return dataset, model, tokenizer
 
 
 def set_multi(args):
     dataset = load_dataset('EdinburghNLP/xsum')['test']
-    # dataset = sorted(dataset, key=lambda x : x['id'])
-    # IA3 는 instruct 를 추가해줘야한다.
-    dataset2 = make_instructed(dataset, args)
+    num_data = 100
 
-    # idx_list = list(range(0, len(dataset))) # random data sampling
-    # num_train_idxs = random.sample(idx_list, 100) 
-    num_train_idxs =  list(range(0, 1)) 
-    dataset = Subset(dataset, num_train_idxs)
-    dataset2 = Subset(dataset2, num_train_idxs
-                      )
-    print('  - Dataset sampling randomly for generation')
+    if args.data_sample == 'sort':
+        dataset = sorted(dataset, key=lambda x : x['id'])[:num_data]
+        dataset = Dataset.from_dict(dataset)
+        dataset2 = make_instructed(dataset, args)
+        print('  - Dataset sampling sorted with ids for generation')
+
+    elif args.data_sample == 'random':
+        # IA3 는 instruct 를 추가해줘야한다.
+        dataset2 = make_instructed(dataset, args)
+        idx_list = list(range(0, len(dataset))) # random data sampling
+        num_train_idxs = random.sample(idx_list, num_data)  
+        dataset = Subset(dataset, num_train_idxs)
+        dataset2 = Subset(dataset2, num_train_idxs)
+        print('  - Dataset sampling randomly for generation')
 
     return dataset, dataset2
 
@@ -293,7 +300,7 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--met_choice', default='multi', choices=['peft', 'original', 'multi'])
     parser.add_argument('--data_choice', default='xsum', choices=['p3', 'xsum'])
-    parser.add_argument('--debug', default=True)
+    parser.add_argument('--data_sample', default='sort', choices=['random', 'sort'])
     parser.add_argument('--num_proc', default=16, help='The number of process of mapping preprocess')
     args = parser.parse_args()
 

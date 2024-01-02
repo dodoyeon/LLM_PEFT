@@ -33,7 +33,7 @@ from datetime import datetime
 def set_peft_config(args):
     if args.peft == "pret":
         peft_config = PrefixTuningConfig(
-            task_type=TaskType.CAUSAL_LM,  # TaskType.SEQ_2_SEQ_LM,
+            task_type=TaskType.CAUSAL_LM,  # TaskType.SEQ_2_SEQ_LM, TaskType.CAUSAL_LM,
             inference_mode=False,
             num_virtual_tokens=(args.vir_tok - 10),  # 20
         )
@@ -104,10 +104,11 @@ def pre_def_clm(args, tokenizer, dataset):
 
 def pre_concat(args, tokenizer, dataset):
     # Concat inputs and targets for CLM training!
+    sep= "\nSummary: "
     dataset = dataset.map(
         lambda examples: {
             "labels": [
-                examples["inputs_pretokenized"][i] + examples["targets_pretokenized"][i].lstrip() for i in range(len(examples["targets_pretokenized"]))
+                examples["inputs_pretokenized"][i] + sep + examples["targets_pretokenized"][i].lstrip() for i in range(len(examples["targets_pretokenized"]))
             ]
         },
         # lambda examples : {'content' : [examples['inputs_pretokenized'][i] + " <se> " + examples['targets_pretokenized'][i].lstrip() for i in range(len(examples['targets_pretokenized']))]},
@@ -153,10 +154,11 @@ def pre_seq2seq(args, tokenizer, dataset):
     # article + <sep> + summary form
     # sep 토큰 tokenizer 에 있는지 없는지 확인하기. -> 원래는 없는 듯.
     # tokenizer.add_special_tokens({'sep_token':'<sep>'}) # num_add_toks=1 이면 굳이 num_add_toks = tokenizer.~ 이렇게 안써도되지않나
+    sep= "\nSummary: " 
     dataset = dataset.map(
         lambda examples: {
             "labels": [
-                examples["document"][i] + " <se> " + examples["summary"][i].lstrip()
+                examples["document"][i] + sep + examples["summary"][i].lstrip()
                 for i in range(len(examples["summary"]))
             ]
         },
@@ -210,7 +212,7 @@ def add_arguments():
     )
     parser.add_argument(
         "--peft",
-        default="else",
+        default="prot",
         choices=["pret", "prot", "ia3"],
         help="which peft method to use - prefix tuning, prompt tuning, ia3",
     )
@@ -224,15 +226,15 @@ def add_arguments():
         "--max_length", "-ml", default=1024, type=int, help="maximum sequence length"
     )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("-save_mode", type=str, choices=["all", "best"], default="best")
+    parser.add_argument("-save_mode", type=str, default="best", choices=["all", "best"])
     parser.add_argument("--model_name_or_path", default="gpt2-large", help="base model") #  meta-llama/Llama-2-7b-chat-hf
     parser.add_argument(
         "--output_dir", default="output_pt", help="experiment result save directory"
     )
-    parser.add_argument("--data_choice", choices=["p3", "org_xsum", "dataset.pkl"], default="p3")
+    parser.add_argument("--data_choice", default="xsum", choices=["p3", "org_xsum", "dataset.pkl"])
     parser.add_argument(
         "--data_preprocess",
-        default="concat",
+        default="seq2seq",
         choices=["def_clm", "concat", "seq2seq", "cached"],
         dest="data",
         help="data preprocess method for Causal LM",
@@ -277,7 +279,7 @@ def add_arguments():
 
 def main():
     args = add_arguments()
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)# , pad_token="<pad>"
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, pad_token="<pad>")# , pad_token="<pad>"
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -310,7 +312,7 @@ def main():
     if args.data_choice == 'p3':
         dataset = load_dataset("bigscience/P3", name="xsum_summarize_this_DOC_summary")
 
-    elif args.data_choice == 'org_xsum':
+    elif args.data_choice == 'xsum':
         dataset = load_dataset("EdinburghNLP/xsum")
 
     elif args.data_choice == "dataset.pkl":
@@ -334,10 +336,10 @@ def main():
     else:
         raise NotImplementedError
 
-    # model.resize_token_embeddings(len(tokenizer))  # resize 는 반드시 get_peft_model(즉, peft를 씌우기전에) 해줘야한다!
+    model.resize_token_embeddings(len(tokenizer))  # resize 는 반드시 get_peft_model(즉, peft를 씌우기전에) 해줘야한다!
 
-    # model = get_peft_model(model, peft_config)
-    # model.print_trainable_parameters()
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
 
     train_dataset = tokenized_dataset["train"]
     eval_dataset = tokenized_dataset["validation"]

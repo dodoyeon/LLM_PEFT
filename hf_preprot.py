@@ -85,7 +85,7 @@ def main():
                         dest='batch_size', help='training batch size')
     parser.add_argument('--vir_tok', default=30, type=int,
                         help = 'prompt, prefix tuning num_virtual_token')
-    parser.add_argument('--peft', default='prot', type=str, choice=['pret', 'prot'],
+    parser.add_argument('--peft', default='prot', type=str, choices=['pret', 'prot'],
                         help='peft method choice prefix or prompt tuning')
     parser.add_argument('--max_length', '-ml', default=1004, type=int, # 1024 인데 prefix length=20 이라서,
                         dest='max_length', help='maximum sequence length')
