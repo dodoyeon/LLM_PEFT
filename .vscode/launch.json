@@ -8,21 +8,20 @@
             "name": "Python: Debug DeepSpeed",
             "type": "python",
             "request": "launch",
-            "program": "/root/dyeon/LLM_PEFT/.venv/bin/deepspeed",
+            "program": "/root/LLM_PEFT/.venv/bin/deepspeed",
             "justMyCode": false,
             "console": "integratedTerminal",
             "args": [
                 "hf_trainer_prot.py",
             ]
         },
-
-        {
-            "name": "Python: Current File",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "justMyCode": false
-        }
+        // {
+        //     "name": "Python: Current File",
+        //     "type": "python",
+        //     "request": "launch",
+        //     "program": "${file}",
+        //     "console": "integratedTerminal",
+        //     "justMyCode": false
+        // }
     ]
 }

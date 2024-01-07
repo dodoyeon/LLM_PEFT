@@ -371,13 +371,14 @@ def main():
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         learning_rate=args.lr,
-        warmup_steps=1000,
+        warmup_steps=10,
         logging_dir="log",
+        evaluation_strategy="steps",
         logging_steps=args.interval,
         logging_first_step =True,
         save_steps=args.interval,
         seed=args.seed,
-        prediction_loss_only=True,
+        prediction_loss_only=True, #??
         load_best_model_at_end = True,
         save_total_limit = 1,
         deepspeed=args.deepspeed,  # deepspeed 명령어는 run 할 때, train args 는 디버깅할 때 사용.
