@@ -245,7 +245,7 @@ def add_arguments():
     parser.add_argument(
         "--debug", default=False, help="data sampling with Subset for debugging"
     )
-    parser.add_argument("--interval", default=17004, help="evaluate term")
+    parser.add_argument("--interval", default=6067, help="evaluate term")
 
     parser.add_argument(
         "--deepspeed",
@@ -372,7 +372,6 @@ def main():
         per_device_train_batch_size=args.batch_size,
         learning_rate=args.lr,
         warmup_steps=1000,
-        evaluation_strategy="epoch",
         logging_dir="log",
         logging_steps=args.interval,
         logging_first_step =True,
