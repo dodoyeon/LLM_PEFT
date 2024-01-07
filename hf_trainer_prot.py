@@ -202,7 +202,7 @@ def add_arguments():
     parser.add_argument(
         "--learning_rate",
         "-lr",
-        default=0.03, # 3e−3
+        default=0.003, # 3e−3
         type=float,
         dest="lr",
         help="training learning rate",
@@ -212,7 +212,7 @@ def add_arguments():
     )
     parser.add_argument(
         "--peft",
-        default="prot",
+        default="ia3",
         choices=["pret", "prot", "ia3"],
         help="which peft method to use - prefix tuning, prompt tuning, ia3",
     )
@@ -379,6 +379,8 @@ def main():
         save_steps=args.interval,
         seed=args.seed,
         prediction_loss_only=True,
+        load_best_model_at_end = True,
+        save_total_limit = 1,
         deepspeed=args.deepspeed,  # deepspeed 명령어는 run 할 때, train args 는 디버깅할 때 사용.
     )
 
