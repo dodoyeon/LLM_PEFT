@@ -229,7 +229,7 @@ def add_arguments():
     parser.add_argument("-save_mode", type=str, default="best", choices=["all", "best"])
     parser.add_argument("--model_name_or_path", default="gpt2-large", help="base model") #  meta-llama/Llama-2-7b-chat-hf
     parser.add_argument(
-        "--output_dir", default="output_pt", help="experiment result save directory"
+        "--output_dir", default="output", help="experiment result save directory"
     )
     parser.add_argument("--data_choice", default="gemini_new.json", choices=["p3", "org_xsum", "dataset.pkl", "gemini_new.json"])
     parser.add_argument(
@@ -297,12 +297,12 @@ def main():
         # torch.set_deterministic(True)
 
     # 실험 결과 저장 directory
-    if os.path.exists(args.output_dir):
-        args.output_dir += datetime.today().strftime("_%Y%m%d_%H%M%S")
-        print("   - Output directory is changed to avoid overlapping.")
-        print("test")
-    else:  # Trainer 에서는 mkdir 를 사용하지 않아도 자동으로 만들어준다
-        pass
+    # if os.path.exists(args.output_dir):
+    #     args.output_dir += datetime.today().strftime("_%Y%m%d_%H%M%S")
+    #     print("   - Output directory is changed to avoid overlapping.")
+    #     print("test")
+    # else:  # Trainer 에서는 mkdir 를 사용하지 않아도 자동으로 만들어준다
+    #     pass
 
     if args.peft in ["pret", "prot", "ia3"]:
         peft_config = set_peft_config(args)
@@ -371,7 +371,7 @@ def main():
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         learning_rate=args.lr,
-        warmup_steps=10,
+        warmup_steps=1000,
         logging_dir="log",
         evaluation_strategy="steps",
         logging_steps=args.interval,
